@@ -18,10 +18,6 @@ Entity-First Manufacturing Analytics Platform
 
 ## Documentation
 
-- [Entity Model](docs/ENTITY_MODEL.md)
-- [Tool Catalog](docs/TOOL_CATALOG.md)
-- [Security](docs/SECURITY.md)
 
 ## Demo
 
-See [demo script](demo/demo_script.md) for 5-scenario walkthrough.
