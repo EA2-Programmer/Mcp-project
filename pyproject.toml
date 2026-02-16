@@ -1,0 +1,26 @@
+# pyproject.toml
+[project]
+name = "trakSys-mcp-server"
+version = "1.0.0"
+description = "Entity-First Manufacturing Analytics Platform"
+requires-python = ">=3.10"
+dependencies = [
+    "fastmcp>=0.2.0",
+    "pyodbc>=5.0.0",
+    "python-dotenv>=1.0.0",
+    "pandas>=2.0.0",
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "python-dateutil>=2.8.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "black",
+    "pylint",
+    "mypy",
+]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
