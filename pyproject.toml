@@ -1,25 +1,52 @@
+[build-system]
+requires = ["setuptools>=65.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
-name = "trakSys-mcp-server"
+name = "traksys-mcp-server"
 version = "1.0.0"
-description = "Entity-First Manufacturing Analytics Platform"
+description = "TrakSYS Analytics MCP Server —  × KdG Hogeschool"
+readme = "README.md"
 requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+    { name = "Aisosa, Kingsley, Hudini" }
+]
+keywords = ["mcp", "manufacturing", "sql-server", "analytics", "traksys"]
+
 dependencies = [
     "fastmcp>=0.2.0",
     "pyodbc>=5.0.0",
+    "pydantic>=2.0.0",
+    "pydantic-settings>=2.0.0",
     "python-dotenv>=1.0.0",
-    "pandas>=2.0.0",
-    "pytest>=7.0.0",
-    "pytest-asyncio>=0.21.0",
     "python-dateutil>=2.8.2",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "black",
-    "pylint",
-    "mypy",
+    "pytest>=7.4.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-cov>=4.1.0",
+    "black>=23.0.0",
+    "ruff>=0.1.0",
 ]
 
-[build-system]
-requires = ["setuptools>=61.0"]
-build-backend = "setuptools.build_meta"
+[project.scripts]
+traksys-mcp = "traksys_mcp.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = "-v"
+
+[tool.black]
+line-length = 100
+target-version = ["py310"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
