@@ -7,7 +7,7 @@ Manufacturing Analytics Platform
 - Python 3.9+
 - Anthropic API Key
 
-## Setup test
+## Setup testing again
 
 ### Step 1: Pull the project repository
 
