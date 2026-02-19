@@ -6,7 +6,7 @@ Usage:
 """
 
 import asyncio
-from traksys_mcp.server import main
+from src.traksys_mcp.server import main
 
 if __name__ == "__main__":
     asyncio.run(main())

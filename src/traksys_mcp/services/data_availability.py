@@ -5,7 +5,7 @@ Caches min/max dates per table to enable fallback when user requests
 dates outside the available data range.
 """
 
-from traksys_mcp.core.database import execute_query
+from src.traksys_mcp.core.database import execute_query
 from typing import Optional, Tuple
 from datetime import date
 import logging

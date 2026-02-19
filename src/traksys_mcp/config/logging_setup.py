@@ -10,7 +10,7 @@ import logging
 import re
 import sys
 
-from traksys_mcp.config.setting import settings
+from src.traksys_mcp.config.setting import settings
 
 
 class SensitiveDataFilter(logging.Filter):

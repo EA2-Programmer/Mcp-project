@@ -16,7 +16,7 @@ from typing import Any
 
 import pyodbc
 
-from traksys_mcp.config.setting import settings
+from src.traksys_mcp.config.setting import settings
 from .exceptions import ConnectionsError, DatabaseError, QueryTimeoutError, SecurityError, ValidationError
 
 logger = logging.getLogger(__name__)

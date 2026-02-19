@@ -6,7 +6,7 @@ Provides functions for:
 - Readiness probes (is the server ready to handle requests?)
 """
 
-from traksys_mcp.core.database import check_connection
+from src.traksys_mcp.core.database import check_connection
 from typing import Dict, Any
 from datetime import datetime
 import logging
