@@ -326,7 +326,7 @@ async def get_batch_materials(
     where_parts = []
     params = []
 
-    # Always filter by job_id now
+    #filter by job_id
     where_parts.append("mua.JobID = ?")
     params.append(job_id)
 
