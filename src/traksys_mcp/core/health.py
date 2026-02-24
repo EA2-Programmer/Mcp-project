@@ -8,7 +8,7 @@ Provides functions for:
 
 from src.traksys_mcp.core.database import check_connection
 from typing import Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone
 import logging
 
 logger = logging.getLogger(__name__)
@@ -26,7 +26,7 @@ async def health_check() -> Dict[str, Any]:
     """
     return {
         "status": "alive",
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "server": "TrakSYS MCP",
         "version": "1.0.0"
     }
@@ -50,5 +50,5 @@ async def readiness_check() -> Dict[str, Any]:
         "checks": {
             "database": "connected" if is_db_ready else "disconnected"
         },
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     }
