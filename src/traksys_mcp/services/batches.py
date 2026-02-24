@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 
 async def get_batches(
         batch_id: Optional[int] = None,
+        batch_name: Optional[str] = None,
         system_id: Optional[int] = None,
         job_id: Optional[int] = None,
         time_window: Optional[str] = None,
@@ -27,40 +28,41 @@ async def get_batches(
     """
     Query batches with intelligent time handling.
 
-    Args:
-        batch_id: Specific batch ID (tBatch.ID)
-        system_id: System/Line ID (tBatch.SystemID)
-        job_id: Job ID (tBatch.JobID)
-        time_window: Natural language time (e.g., "yesterday", "last 7 days")
-        start_date: Explicit start date (ISO format)
-        end_date: Explicit end date (ISO format)
-        state: Batch state filter (tBatch.State - integer)
-        limit: Max rows
-        time_service: TimeResolutionService instance (optional)
-
-    Returns:
-        {
-            "batches": [...],
-            "count": int,
-            "time_info": {...} or None
-        }
+    Supports lookup by numeric batch_id OR batch_name (most common for users).
     """
+    # === Resolve batch_name to numeric ID if provided ===
+    if batch_name and batch_id is None:
+        sql_lookup = """
+            SELECT TOP 1 ID 
+            FROM tBatch 
+            WHERE Name = ? OR AltName = ? OR Lot = ?
+            ORDER BY StartDateTime DESC
+        """
+        _, rows = await execute_query(sql_lookup, (batch_name, batch_name, batch_name))
+        if rows and rows[0][0]:
+            batch_id = rows[0][0]
+            logger.info(f"Resolved batch_name '{batch_name}' → ID {batch_id}")
+        else:
+            return {
+                "batches": [],
+                "count": 0,
+                "message": f"No batch found with name/code '{batch_name}'"
+            }
+
     time_info = None
     actual_start = start_date
     actual_end = end_date
 
     # If time_window provided and time_service available, resolve it
-    if time_window and time_service:
+    if time_window and time_service and batch_id is None:
         resolution = await time_service.resolve(time_window, table="tBatch")
         time_info = resolution
-
-        # Use the actual dates (potentially fallback dates)
         actual_start = resolution["actual"]["start"].split("T")[0]
-        actual_end = resolution["actual"]["end"].split("T")[0]
+        actual_end   = resolution["actual"]["end"].split("T")[0]
 
-    # Build WHERE clause dynamically
+    # Build dynamic WHERE
     where_parts = []
-    params = []
+    params: List[Any] = []
 
     if batch_id is not None:
         where_parts.append("b.ID = ?")
@@ -88,7 +90,6 @@ async def get_batches(
 
     where_clause = " AND ".join(where_parts) if where_parts else "1=1"
 
-    # SQL using CORRECT column names from your schema
     sql = f"""
         SELECT TOP {limit}
             b.ID,
@@ -134,7 +135,8 @@ async def get_batches(
 
 async def get_batch_parameters(
         batch_id: Optional[int] = None,
-        parameter_names: Optional[list[str]] = None,
+        batch_name: Optional[str] = None,
+        parameter_names: Optional[List[str]] = None,
         deviation_only: bool = False,
         time_window: Optional[str] = None,
         start_date: Optional[str] = None,
@@ -145,26 +147,31 @@ async def get_batch_parameters(
     """
     Retrieve batch process parameters with intelligent time handling.
 
-    Main tables: tBatchParameter, tBatch, tParameterDefinition
-
-    Supports:
-    - specific batch → ignores time filters
-    - time-based query → uses tBatch.StartDateTime / EndDateTime
-    - deviation filtering (simple min/max check)
-    - parameter name filtering
-
-    Returns:
-        {
-            "parameters": list of dicts,
-            "count": int,
-            "time_info": dict or None
-        }
+    Supports lookup by numeric batch_id OR batch_name (most common for users).
     """
+    # === Resolve batch_name to numeric ID if provided ===
+    if batch_name and batch_id is None:
+        sql_lookup = """
+            SELECT TOP 1 ID 
+            FROM tBatch 
+            WHERE Name = ? OR AltName = ? OR Lot = ?
+            ORDER BY StartDateTime DESC
+        """
+        _, rows = await execute_query(sql_lookup, (batch_name, batch_name, batch_name))
+        if rows and rows[0][0]:
+            batch_id = rows[0][0]
+            logger.info(f"Resolved batch_name '{batch_name}' → ID {batch_id}")
+        else:
+            return {
+                "parameters": [],
+                "count": 0,
+                "message": f"No batch found with name/code '{batch_name}'"
+            }
+
     time_info = None
     actual_start = start_date
     actual_end = end_date
 
-    # Resolve natural language time → fallback-aware dates
     if time_window and time_service and batch_id is None:
         resolution = await time_service.resolve(time_window, table="tBatch")
         time_info = resolution
@@ -200,7 +207,7 @@ async def get_batch_parameters(
 
     where_clause = " AND ".join(where_parts) if where_parts else "1=1"
 
-    # Main query – uses correct column names from EBR_Template schema
+    # FIXED: Removed datetimeoffset columns to avoid pyodbc HY106 error
     sql = f"""
         SELECT TOP {limit}
             bp.ID                       AS parameter_id,
@@ -214,9 +221,6 @@ async def get_batch_parameters(
             TRY_CAST(bp.Value AS float) AS value_numeric,
             pd.MinimumValue             AS min_allowed,
             pd.MaximumValue             AS max_allowed,
-            bp.ModifiedDateTime         AS recorded_at,
-            b.StartDateTime             AS batch_start,
-            b.EndDateTime               AS batch_end,
             CASE WHEN TRY_CAST(bp.Value AS float) IS NOT NULL
                  AND (TRY_CAST(bp.Value AS float) < pd.MinimumValue
                       OR TRY_CAST(bp.Value AS float) > pd.MaximumValue)
@@ -242,13 +246,14 @@ async def get_batch_parameters(
         result["time_info"] = time_info
 
     logger.info(f"get_batch_parameters → {len(parameters)} rows "
-                f"(batch_id={batch_id}, deviation_only={deviation_only}, time={time_window})")
+                f"(batch_id={batch_id}, batch_name={batch_name}, deviation_only={deviation_only})")
 
     return result
 
-
 async def get_batch_materials(
         batch_id: Optional[int] = None,
+        batch_name: Optional[str] = None,
+        job_id: Optional[int] = None,                # ← NEW
         material_names: Optional[List[str]] = None,
         material_codes: Optional[List[str]] = None,
         time_window: Optional[str] = None,
@@ -258,45 +263,78 @@ async def get_batch_materials(
         time_service: Optional[TimeResolutionService] = None
 ) -> dict:
     """
-    Retrieve actual material usage/consumption per batch.
+    Retrieve actual material usage/consumption.
 
-    Main tables: tMaterialUseActual, tBatch, tMaterial
-
-    Supports:
-    - specific batch → ignores time filters
-    - time-based query → uses tBatch.StartDateTime
-    - filter by material name or code
-    - intelligent time fallback via DataAvailabilityCache
-
-    Returns:
-        {
-            "materials": list of dicts,
-            "count": int,
-            "time_info": dict or None
-        }
+    Supports lookup by:
+    - batch_id (numeric tBatch.ID)
+    - batch_name (name/code/lot → resolves to batch → resolves to job)
+    - job_id (direct numeric JobID)
     """
+    # 1. If batch_name given → resolve to batch_id
+    if batch_name and batch_id is None:
+        sql_lookup = """
+            SELECT TOP 1 ID 
+            FROM tBatch 
+            WHERE Name = ? OR AltName = ? OR Lot = ?
+            ORDER BY StartDateTime DESC
+        """
+        _, rows = await execute_query(sql_lookup, (batch_name, batch_name, batch_name))
+        if rows and rows[0][0]:
+            batch_id = rows[0][0]
+            logger.info(f"Resolved batch_name '{batch_name}' → batch_id {batch_id}")
+        else:
+            return {
+                "materials": [],
+                "count": 0,
+                "message": f"No batch found with name/code '{batch_name}'"
+            }
+
+    # 2. If batch_id given → resolve to job_id
+    if batch_id is not None and job_id is None:
+        sql_job = "SELECT TOP 1 JobID FROM tBatch WHERE ID = ?"
+        _, rows = await execute_query(sql_job, (batch_id,))
+        if rows and rows[0][0]:
+            job_id = rows[0][0]
+            logger.info(f"Resolved batch_id {batch_id} → job_id {job_id}")
+        else:
+            return {
+                "materials": [],
+                "count": 0,
+                "message": f"No job found for batch_id {batch_id}"
+            }
+
+    # 3. Now we MUST have job_id to query materials
+    if job_id is None:
+        return {
+            "materials": [],
+            "count": 0,
+            "message": "No batch_id, batch_name or job_id provided (or resolution failed)"
+        }
+
+    # Now proceed with time resolution (if needed)
     time_info = None
     actual_start = start_date
     actual_end = end_date
 
-    # Resolve natural language time → fallback-aware dates
-    if time_window and time_service and batch_id is None:
-        resolution = await time_service.resolve(time_window, table="tBatch")
+    if time_window and time_service:
+        resolution = await time_service.resolve(time_window, table="tMaterialUseActual")
         time_info = resolution
         actual_start = resolution["actual"]["start"].split("T")[0]
         actual_end   = resolution["actual"]["end"].split("T")[0]
 
+    # Build WHERE
     where_parts = []
-    params: List[Any] = []
+    params = []
 
-    if batch_id is not None:
-        where_parts.append("mua.BatchID = ?")
-        params.append(batch_id)
-    elif actual_start:
-        where_parts.append("b.StartDateTime >= ?")
+    # Always filter by job_id now
+    where_parts.append("mua.JobID = ?")
+    params.append(job_id)
+
+    if actual_start:
+        where_parts.append("mua.DateTime >= ?")
         params.append(actual_start + " 00:00:00")
     if actual_end:
-        where_parts.append("b.EndDateTime <= ?")
+        where_parts.append("mua.DateTime <= ?")
         params.append(actual_end + " 23:59:59")
 
     if material_names:
@@ -311,33 +349,26 @@ async def get_batch_materials(
 
     where_clause = " AND ".join(where_parts) if where_parts else "1=1"
 
+    # Final query (no datetimeoffset columns to avoid crash)
     sql = f"""
         SELECT TOP {limit}
             mua.ID                      AS material_use_id,
-            mua.BatchID                 AS batch_id,
+            mua.JobID                   AS job_id,
+            b.ID                        AS batch_id,
             b.Name                      AS batch_name,
             b.Lot                       AS batch_lot,
             b.SubLot                    AS batch_sublot,
             mat.Name                    AS material_name,
             mat.MaterialCode            AS material_code,
             mat.Units                   AS units,
-            mua.Quantity                AS consumed_quantity,
-            mua.PlannedQuantity         AS planned_quantity,          -- may be NULL
-            mua.DateTime                AS consumption_datetime,
-            b.StartDateTime             AS batch_start,
-            b.EndDateTime               AS batch_end,
-            CASE 
-                WHEN mua.PlannedQuantity IS NOT NULL 
-                     AND mua.Quantity > mua.PlannedQuantity * 1.1    -- example 10% over
-                THEN 1 ELSE 0 
-            END                         AS is_over_consumption
+            mua.Quantity                AS consumed_quantity
         FROM tMaterialUseActual mua
         INNER JOIN tBatch b
-            ON mua.BatchID = b.ID
+            ON mua.JobID = b.JobID
         INNER JOIN tMaterial mat
             ON mua.MaterialID = mat.ID
         WHERE {where_clause}
-        ORDER BY b.StartDateTime DESC, mua.DateTime DESC
+        ORDER BY mua.DateTime DESC
     """
 
     columns, rows = await execute_query(sql, tuple(params))
@@ -352,6 +383,6 @@ async def get_batch_materials(
         result["time_info"] = time_info
 
     logger.info(f"get_batch_materials → {len(materials)} rows "
-                f"(batch_id={batch_id}, time={time_window})")
+                f"(batch_id={batch_id}, batch_name={batch_name}, job_id={job_id})")
 
     return result
