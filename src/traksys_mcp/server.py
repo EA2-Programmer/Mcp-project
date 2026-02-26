@@ -13,7 +13,7 @@ from fastmcp import FastMCP
 from src.traksys_mcp.config.setting import settings
 from src.traksys_mcp.config.logging_setup import setup_logging
 from src.traksys_mcp.core.database import check_connection
-from src.traksys_mcp.core.exceptions import ConnectionsError
+from src.traksys_mcp.core.exceptions import DatabaseConnectionError
 from src.traksys_mcp.services.data_availability import DataAvailabilityCache
 from src.traksys_mcp.services.time_resolution import TimeResolutionService
 from src.traksys_mcp.tools.batches import BatchTools
@@ -58,7 +58,7 @@ class TrakSYSMCPServer:
         # Check database connectivity
         self.logger.info("Checking database connection...")
         if not await check_connection():
-            raise ConnectionsError(
+            raise DatabaseConnectionError(
                 "Cannot reach database. Check MSSQL_CONNECTION_STRING in .env"
             )
         self.logger.info("✓ Database connection verified")

@@ -1,5 +1,4 @@
 """
-
 Custom exception hierarchy for the TrakSYS MCP Server.
 
 All application-specific errors inherit from TrakSYSError, making it
@@ -18,7 +17,9 @@ class TrakSYSError(Exception):
     Catching this catches any application error while leaving
     standard Python exceptions (ValueError, TypeError, etc.) untouched.
     """
-    pass
+    def __init__(self, message: str, context: dict | None = None):
+        super().__init__(message)
+        self.context = context or {}
 
 
 class DatabaseError(TrakSYSError):
@@ -32,7 +33,7 @@ class DatabaseError(TrakSYSError):
     pass
 
 
-class ConnectionsError(DatabaseError):
+class DatabaseConnectionError(DatabaseError):
     """
     Failed to establish or maintain a database connection.
 
