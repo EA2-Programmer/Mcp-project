@@ -56,7 +56,13 @@ def setup_logging() -> None:
     imports logging. Subsequent calls are safe — existing handlers
     are cleared first.
     """
-    log_level = getattr(logging, settings.LOG_LEVEL, logging.INFO)
+    log_level_name = settings.LOG_LEVEL.upper()
+    log_level = getattr(logging, log_level_name, logging.INFO)
+
+    if log_level is None:
+        # Fallback to stderr since logger not fully configured yet
+        print(f"WARNING: Invalid LOG_LEVEL '{settings.LOG_LEVEL}', using INFO", file=sys.stderr)
+        log_level = logging.INFO
 
     root_logger = logging.getLogger()
     root_logger.setLevel(log_level)

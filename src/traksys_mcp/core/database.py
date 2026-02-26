@@ -17,13 +17,14 @@ from typing import Any
 import pyodbc
 
 from src.traksys_mcp.config.setting import settings
-from .exceptions import ConnectionsError, DatabaseError, QueryTimeoutError, SecurityError, ValidationError
+from .exceptions import DatabaseConnectionError, DatabaseError, QueryTimeoutError, SecurityError, ValidationError
 
 logger = logging.getLogger(__name__)
 
 # ODBC connection pooling — reuses connections across calls instead of
 # opening a new TCP connection on every query
 pyodbc.pooling = True
+
 
 # ---------------------------------------------------------------------------
 # SQL Validation
@@ -108,20 +109,21 @@ def _get_connection():
     conn = None
     try:
         conn = pyodbc.connect(
-            settings.MSSQL_CONNECTION_STRING,
+            settings.MSSQL_CONNECTION_STRING.get_secret_value(),
             autocommit=False,
             timeout=settings.MSSQL_CONNECTION_TIMEOUT,
         )
+        conn.add_output_converter(-155, lambda raw: raw.decode("utf-16-le"))
         yield conn
     except pyodbc.Error as e:
-        logger.error("Connection failed: %s", e)
-        raise ConnectionsError(f"Could not connect to database: {e}") from e
+        logger.error("Connection failed: %s", e) # we should revisit here to ensure password are not logged
+        raise DatabaseConnectionError(f"Could not connect to database: {e}") from e
     finally:
         if conn:
             try:
                 conn.close()
             except Exception:
-                pass  # connection is gone anyway
+                pass
 
 
 # ---------------------------------------------------------------------------
@@ -172,7 +174,8 @@ async def execute_query(
                 columns = [desc[0] for desc in cursor.description] if cursor.description else []
                 rows: list[tuple] = []
                 while True:
-                    batch = cursor.fetchmany(500)
+                    FETCH_BATCH_SIZE = getattr(settings, 'DB_FETCH_BATCH_SIZE', 500)
+                    batch = cursor.fetchmany(FETCH_BATCH_SIZE)
                     if not batch:
                         break
                     rows.extend(batch)

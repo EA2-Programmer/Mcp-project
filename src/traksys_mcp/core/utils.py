@@ -10,29 +10,56 @@ Usage:
     return {"batches": [serialize_row(r) for r in rows], "count": len(rows)}
 """
 
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import Any
+import logging
 
+logger = logging.getLogger(__name__)
 
 def serialize_value(value: Any) -> Any:
     """
     Convert a single SQL Server value to a JSON-safe type.
 
-    Handles the types pyodbc returns that standard json.dumps() rejects:
-    - datetime / date  → ISO 8601 string
-    - bytes / bytearray → placeholder string (binary blobs are not useful to LLMs)
-    - bool             → bool (must be checked BEFORE int — bool is a subclass of int)
-    - None             → None (pass through, JSON null)
-    - everything else  → returned as-is
+    Handles:
+    - datetime / date → ISO 8601 string (converts to UTC)
+    - dateTimeOffset → timezone-aware datetime → UTC ISO string
+    - bytes / bytearray → placeholder string
+    - bool → bool
+    - None → None
     """
     if value is None:
         return None
-    if isinstance(value, bool):          # before int — bool subclasses int
+
+    if isinstance(value, bool):
         return value
+
     if isinstance(value, (datetime, date)):
-        return value.isoformat()
+        try:
+            # Handle timezone-aware datetimes (datetimeoffset)
+            if isinstance(value, datetime) and value.tzinfo is not None:
+                # Convert to UTC for consistency
+                value = value.astimezone(timezone.utc)
+            return value.isoformat()
+        except Exception as e:
+            logger.warning(f"Failed to serialize datetime {value}: {e}")
+            return str(value)
+
     if isinstance(value, (bytes, bytearray)):
-        return "<binary>"
+        # Try to decode common SQL Server date/time formats
+        try:
+            # Attempt to decode as UTF-16-LE (common for SQL Server)
+            decoded = value.decode('utf-16-le').strip('\x00')
+            # If it looks like an ISO date, parse and format it
+            if decoded and decoded[0].isdigit() and ('-' in decoded or 'T' in decoded):
+                try:
+                    dt = datetime.fromisoformat(decoded.replace('Z', '+00:00'))
+                    return dt.isoformat()
+                except:
+                    pass
+            return "<binary>"
+        except Exception:
+            return "<binary>"
+
     return value
 
 
