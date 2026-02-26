@@ -192,3 +192,59 @@ class GetBatchMaterialsInput(BaseModel):
         le=1000,
         description="Maximum number of material usage records to return (1–1000)"
     )
+
+
+class GetEquipmentStateInput(BaseModel):
+    """Input schema for get_equipment_state tool."""
+
+    system_id: Optional[int] = Field(
+        None,
+        description="Specific equipment/system ID (tSystem.ID)."
+    )
+
+    system_name: Optional[str] = Field(
+        None,
+        description="Equipment name or code (tSystem.Name or AltName). Example: 'Packer 01'."
+    )
+
+    area_id: Optional[int] = Field(
+        None,
+        description="Filter equipment by Area ID. Use this to see status of an entire department."
+    )
+
+    time_window: Optional[str] = Field(
+        None,
+        description=(
+            "Natural language time expression for performance analysis. "
+            "Examples: 'yesterday', 'last 7 days', 'this week'. "
+            "Default behavior (without time) shows 'Current Status'."
+        )
+    )
+
+    start_date: Optional[str] = Field(
+        None,
+        description="Explicit start date in ISO format (YYYY-MM-DD)."
+    )
+
+    end_date: Optional[str] = Field(
+        None,
+        description="Explicit end date in ISO format (YYYY-MM-DD)."
+    )
+
+    include_oee: bool = Field(
+        False,
+        description="If true, calculates OEE, Availability, and Performance metrics for the period."
+    )
+
+    include_tags: bool = Field(
+        False,
+        description="If true, fetches real-time tag values (Speed, Pressure, etc.) from tTag."
+    )
+
+    limit: int = Field(
+        default=50,
+        ge=1,
+        le=500,
+        description="Maximum number of records to return."
+    )
+    
