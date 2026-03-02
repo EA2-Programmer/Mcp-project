@@ -5,7 +5,7 @@ Performance and Equipment-related MCP tools.
 import logging
 from typing import TYPE_CHECKING
 
-from src.traksys_mcp.models.responses import ToolResponse
+from src.traksys_mcp.models.tool_outputs import ToolResponse
 from src.traksys_mcp.services import performance
 from src.traksys_mcp.models.tool_inputs import GetEquipmentStateInput
 
@@ -66,6 +66,16 @@ class PerformanceTools:
                 equipment_list = result["equipment"]
                 time_info = result.get("time_info")
 
+                if not equipment_list:
+                    return ToolResponse.no_data(
+                        suggestions=[
+                            "Verify the system_name or system_id is correct",
+                            "Ensure the equipment is enabled in tSystem",
+                            "Try a broader area_id or time_window",
+                        ],
+                        time_info=time_info,
+                    ).to_dict()
+
                 if time_info and time_info.get("fallback_triggered"):
                     response = ToolResponse.partial(
                         data=equipment_list,
@@ -75,8 +85,7 @@ class PerformanceTools:
                 else:
                     response = ToolResponse.success(
                         data=equipment_list,
-                        time_info=time_info,
-                        message=result.get("message")
+                        time_info=time_info
                     )
 
                 return response.to_dict()
@@ -84,7 +93,7 @@ class PerformanceTools:
             except Exception as e:
                 self.logger.error(f"get_equipment_state failed: {e}", exc_info=True)
                 return ToolResponse.error(
-                    error=str(e),
+                    message=str(e),
                     suggestions=[
                         "Verify the system_name or system_id is correct",
                         "Check if the equipment is Enabled in tSystem",
