@@ -17,6 +17,7 @@ from src.traksys_mcp.core.exceptions import DatabaseConnectionError
 from src.traksys_mcp.services.data_availability import DataAvailabilityCache
 from src.traksys_mcp.services.time_resolution import TimeResolutionService
 from src.traksys_mcp.tools.batches import BatchTools
+from src.traksys_mcp.tools.performance import PerformanceTools
 
 
 class TrakSYSMCPServer:
@@ -37,6 +38,7 @@ class TrakSYSMCPServer:
 
         # Tools (registered after services are ready)
         self.batch_tools: Optional[BatchTools] = None
+        self.performance_tools: Optional[PerformanceTools] = None
 
     def setup_logging(self) -> None:
         """Initialize logging configuration."""
@@ -91,15 +93,14 @@ class TrakSYSMCPServer:
         )
         self.batch_tools.register()
 
+        # Register performance tools
+        self.performance_tools = PerformanceTools(
+            mcp=self.mcp,
+            time_service=self.time_service
+        )
+        self.performance_tools.register()
+
         # Add more tool registrations as they're built:
-        # self.material_tools = MaterialTools(mcp=self.mcp, time_service=self.time_service)
-        # self.material_tools.register()
-
-        # self.quality_tools = QualityTools(mcp=self.mcp, time_service=self.time_service)
-        # self.quality_tools.register()
-
-        # self.performance_tools = PerformanceTools(mcp=self.mcp, time_service=self.time_service)
-        # self.performance_tools.register()
 
         self.logger.info("✓ Tools registered")
 
@@ -154,12 +155,12 @@ class TrakSYSMCPServer:
             settings.HTTP_BIND_PORT
         )
 
-        # Configure FastMCP for HTTP
-        self.mcp.settings.host = settings.HTTP_BIND_HOST
-        self.mcp.settings.port = settings.HTTP_BIND_PORT
-
         # FastMCP handles the HTTP server (uvicorn + Starlette)
-        await self.mcp.run_http_async()
+        # Pass host and port directly to the async run method
+        await self.mcp.run_http_async(
+            host=settings.HTTP_BIND_HOST,
+            port=settings.HTTP_BIND_PORT
+        )
 
 
 def create_server() -> TrakSYSMCPServer:
