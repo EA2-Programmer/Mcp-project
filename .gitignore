@@ -31,6 +31,7 @@ docs/MYREF.md
 # Logs
 *.log
 
+test_sql.py
 # OS
 .DS_Store
 Thumbs.db
