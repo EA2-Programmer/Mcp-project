@@ -111,8 +111,7 @@ class TrakSYSMCPServer:
         # NEW: Register OEE/Analysis tools
         self.oee_tools = AnalysisTools(
             mcp=self.mcp,
-            time_service=self.time_service
-        )
+            time_service=self.time_service)
         self.oee_tools.register()
 
         # NEW: Register materials tools

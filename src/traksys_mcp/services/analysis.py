@@ -1,10 +1,11 @@
 """
-OEE data queries with proxy calculation.
-Follows OEE Tool Design Document.
+OEE calculation service using client-confirmed tables.
+
+Fixed: [Key] brackets because 'Key' is a SQL reserved word.
 """
 
 import logging
-from typing import Any, Dict
+from typing import Any
 
 from src.traksys_mcp.core.database import execute_query
 from src.traksys_mcp.core.utils import rows_to_dicts
@@ -14,177 +15,167 @@ logger = logging.getLogger(__name__)
 
 
 async def calculate_oee(
-    line: str | None = None,
-    start_date: str | None = None,
-    end_date: str | None = None,
-    granularity: str = "daily",
-    breakdown: bool = True,
-    time_service: TimeResolutionService | None = None,
-) -> Dict[str, Any]:
-    """Calculate OEE or proxy based on available data."""
+        line: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        granularity: str = "daily",
+        breakdown: bool = True,
+        time_service: TimeResolutionService | None = None,
+) -> dict:
+    """
+    Calculate OEE using tOeeCalculation + tOeeInterval.
+    """
     if not start_date or not end_date:
-        raise ValueError("start_date and end_date are required")
+        return {"oee": [], "count": 0, "message": "start_date and end_date are required"}
 
-    system_id = None
-    if line:
-        sql_lookup = "SELECT TOP 1 ID FROM tSystem WHERE Name = ? OR AltName = ?"
-        _, rows = await execute_query(sql_lookup, (line, line))
-        if rows:
-            system_id = rows[0][0]
-        else:
-            return {
-                "oee": {
-                    "line": line,
-                    "date_range": {"start": start_date, "end": end_date},
-                    "data_source": "none",
-                    "oee_available": False,
-                    "oee_message": f"No system found with name '{line}'",
-                }
-            }
+    # Step 1: Resolve line name → OeeCalculationID
+    sql_lookup = """
+        SELECT TOP 1 ID
+        FROM tOeeCalculation
+        WHERE Name LIKE ? 
+           OR [Key] LIKE ?          -- FIXED: brackets because 'Key' is reserved
+           OR CAST(SystemID AS varchar) = ?
+        ORDER BY ID
+    """
+    _, rows = await execute_query(sql_lookup, (f"%{line}%", f"%{line}%", line))
+    if not rows or not rows[0][0]:
+        return {"oee": [], "count": 0, "message": f"No OEE configuration found for line '{line}'"}
 
-    # Step 1: Check for real OEE data
-    where_parts = ["oi.StartDateTime >= ?", "oi.StartDateTime < ?"]
-    params = [start_date, end_date]
-    if system_id:
-        where_parts.append("oi.SystemID = ?")
-        params.append(system_id)
+    oee_calc_id = rows[0][0]
 
-    sql_check = f"SELECT COUNT(*) FROM tOeeInterval oi WHERE {' AND '.join(where_parts)}"
-    _, rows = await execute_query(sql_check, tuple(params))
-    has_real_data = rows[0][0] > 0
+    # Step 2: Time resolution
+    time_info = None
+    actual_start = start_date
+    actual_end = end_date
+    if time_service:
+        resolution = await time_service.resolve(f"{start_date} to {end_date}", table="tOeeInterval")
+        time_info = resolution
+        actual_start = resolution["actual"]["start"]
+        actual_end = resolution["actual"]["end"]
 
-    if has_real_data:
-        data = await _get_real_oee(system_id, start_date, end_date, granularity, breakdown)
-    else:
-        data = await _get_proxy_oee(system_id, start_date, end_date, granularity, breakdown)
-
-    return {"oee": data}
-
-
-async def _get_real_oee(system_id, start_date, end_date, granularity, breakdown) -> Dict[str, Any]:
-    group_by = ""
-    select_extra = ""
-    order_extra = "line"
-
-    if granularity == "daily":
-        select_extra = ", CAST(oi.StartDateTime AS DATE) AS production_date"
-        group_by = "GROUP BY s.Name, CAST(oi.StartDateTime AS DATE)"
-        order_extra = "production_date"
-    elif granularity == "weekly":
-        select_extra = ", DATEPART(week, oi.StartDateTime) AS production_week"
-        group_by = "GROUP BY s.Name, DATEPART(week, oi.StartDateTime)"
-        order_extra = "production_week"
-    elif granularity == "shift":
-        select_extra = ", sh.Name AS shift_name"
-        group_by = "GROUP BY s.Name, sh.Name"
-        order_extra = "shift_name"
-    else:
-        group_by = "GROUP BY s.Name"
-
-    where_parts = ["oi.StartDateTime >= ?", "oi.StartDateTime < ?"]
-    params = [start_date, end_date]
-    if system_id:
-        where_parts.append("oi.SystemID = ?")
-        params.append(system_id)
-
+    # Step 3: Aggregate intervals
     sql = f"""
         SELECT 
-            s.Name AS line{select_extra},
-            SUM(oi.PlannedProductionTime) AS total_planned_seconds,
-            SUM(oi.AvailabilityLossSeconds) AS total_downtime_seconds,
-            (SUM(oi.PlannedProductionTime) - SUM(oi.AvailabilityLossSeconds)) * 100.0 / 
-                NULLIF(SUM(oi.PlannedProductionTime), 0) AS availability_pct,
-            SUM(oi.GoodCalculationUnitsCount) AS good_units,
-            SUM(oi.TotalCalculationUnitsCount) AS total_units,
-            SUM(oi.GoodCalculationUnitsCount) * 100.0 / 
-                NULLIF(SUM(oi.TotalCalculationUnitsCount), 0) AS quality_pct,
-            (SUM(oi.PlannedProductionTime) - SUM(oi.AvailabilityLossSeconds)) * 1.0 / 
-                NULLIF(SUM(oi.PlannedProductionTime), 0) 
-            * SUM(oi.GoodCalculationUnitsCount) * 1.0 / 
-                NULLIF(SUM(oi.TotalCalculationUnitsCount), 0) * 100 AS oee_pct
-        FROM tOeeInterval oi
-        JOIN tSystem s ON oi.SystemID = s.ID AND s.IsTemplate = 0
-        LEFT JOIN tShiftHistory sh ON oi.ShiftHistoryID = sh.ID
-        WHERE {' AND '.join(where_parts)}
-        {group_by}
-        ORDER BY {order_extra}
+            i.Date AS period,
+            SUM(i.TotalCalculationUnitsCount)   AS total_units,
+            SUM(i.GoodCalculationUnitsCount)    AS good_units,
+            SUM(i.BadCalculationUnitsCount)     AS bad_units,
+            SUM(i.AvailabilityLossSeconds)      AS avail_loss_sec,
+            SUM(i.PerformanceLossSeconds)       AS perf_loss_sec,
+            AVG(i.TheoreticalCalculationUnitsPerMinute) AS theo_rate
+        FROM tOeeInterval i
+        WHERE i.OeeCalculationID = ?
+          AND i.StartDateTime >= ?
+          AND i.EndDateTime   <= ?
+        GROUP BY i.Date
+        ORDER BY i.Date
     """
-    columns, rows = await execute_query(sql, tuple(params))
-    return {
-        "data_source": "official_oee",
-        "oee_available": True,
-        ("groups" if group_by else "aggregate"): rows_to_dicts(columns, rows),
-        "tables_queried": ["tOeeInterval", "tSystem"],
-    }
+    params = (oee_calc_id, actual_start, actual_end)
+    columns, rows = await execute_query(sql, params)
+    intervals = rows_to_dicts(columns, rows)
 
+    # Step 4: Compute OEE
+    result = []
+    for row in intervals:
+        total = row.get("total_units") or 1
+        good = row.get("good_units") or 0
 
-async def _get_proxy_oee(system_id, start_date, end_date, granularity, breakdown) -> Dict[str, Any]:
-    group_by = ""
-    select_extra = ""
-    order_extra = "line"
+        avail = max(0, 1 - (row.get("avail_loss_sec") or 0) / 3600)
+        perf = good / (row.get("theo_rate") * total) if row.get("theo_rate") else 0
+        qual = good / total
 
-    if granularity == "daily":
-        select_extra = ", CAST(jsa.StartDateTime AS DATE) AS production_date"
-        group_by = "GROUP BY CAST(jsa.StartDateTime AS DATE)"
-        order_extra = "production_date"
-    elif granularity == "weekly":
-        select_extra = ", DATEPART(week, jsa.StartDateTime) AS production_week"
-        group_by = "GROUP BY DATEPART(week, jsa.StartDateTime)"
-        order_extra = "production_week"
-    elif granularity == "shift":
-        select_extra = ", sh.Name AS shift_name"
-        group_by = "GROUP BY sh.Name"
-        order_extra = "shift_name"
+        oee = avail * perf * qual * 100
 
-    where_parts = ["jsa.StartDateTime >= ?", "jsa.StartDateTime < ?"]
-    params = [start_date, end_date]
-    if system_id:
-        where_parts.append("jsa.SystemID = ?")
-        params.append(system_id)
-
-    # Availability Proxy
-    sql_avail = f"""
-        SELECT 
-            {(select_extra[1:] if select_extra else "''")} as grp,
-            SUM(DATEDIFF(SECOND, jsa.StartDateTime, jsa.EndDateTime)) / 60.0 AS total_active_min,
-            DATEDIFF(SECOND, MIN(jsa.StartDateTime), MAX(jsa.EndDateTime)) / 60.0 AS total_elapsed_min
-        FROM tJobSystemActual jsa
-        LEFT JOIN tShiftHistory sh ON jsa.ShiftHistoryID = sh.ID
-        WHERE {' AND '.join(where_parts)}
-        {group_by}
-    """
-    cols_avail, rows_avail = await execute_query(sql_avail, tuple(params))
-    avail_data = rows_to_dicts(cols_avail, rows_avail)
-
-    proxy_groups = []
-    for entry in avail_data:
-        active = entry.get('total_active_min', 0)
-        elapsed = entry.get('total_elapsed_min', 0)
-        avail_pct = (active / elapsed * 100) if elapsed > 0 else None
-
-        proxy_groups.append({
-            granularity: entry.get('grp', 'aggregate'),
-            "availability_pct": avail_pct,
-            "estimated_oee": avail_pct,  # Simplified proxy
-            "performance_pct": None,
-        })
+        item = {
+            "period": str(row["period"]),
+            "oee": round(oee, 2),
+            "total_units": int(total),
+            "good_units": int(good),
+        }
+        if breakdown:
+            item.update({
+                "availability": round(avail * 100, 2),
+                "performance": round(perf * 100, 2),
+                "quality": round(qual * 100, 2),
+            })
+        result.append(item)
 
     return {
-        "line": system_id or "All",
-        "date_range": {"start": start_date, "end": end_date},
-        "data_source": "proxy",
-        "oee_available": False,
-        "oee_message": "Official OEE data not yet available. Showing proxy from tJobSystemActual.",
-        ("groups" if group_by else "aggregate"): proxy_groups,
-        "jobs_analyzed": await _count_jobs(system_id, start_date, end_date),
-        "tables_queried": ["tJobSystemActual"],
+        "oee": result,
+        "count": len(result),
+        "tables_used": ["tOeeCalculation", "tOeeInterval"],
+        "logic": "Resolved line name to OeeCalculationID using [Key] (bracketed because it's a reserved word), "
+                 "then aggregated real intervals from tOeeInterval and computed OEE = Availability × Performance × Quality.",
+        "time_info": time_info
     }
 
-async def _count_jobs(system_id, start_date, end_date) -> int:
-    sql = "SELECT COUNT(DISTINCT JobID) FROM tJobSystemActual jsa WHERE StartDateTime >= ? AND StartDateTime < ?"
-    params = [start_date, end_date]
-    if system_id:
-        sql += " AND SystemID = ?"
-        params.append(system_id)
-    _, rows = await execute_query(sql, tuple(params))
-    return rows[0][0] or 0
+# ─────────────────────────────────────────────────────────────────────────────
+# 2. NEW: get_oee_downtime_events (FIXED VERSION)
+# ─────────────────────────────────────────────────────────────────────────────
+async def get_oee_downtime_events(
+        line: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        limit: int = 50,
+        time_service: TimeResolutionService | None = None,
+) -> dict:
+    """
+    Show actual downtime and quality events for a line.
+    """
+    if not start_date or not end_date:
+        return {"events": [], "count": 0, "message": "start_date and end_date required"}
+
+    # Resolve line name to OeeCalculationID
+    sql_lookup = """
+        SELECT TOP 1 ID FROM tOeeCalculation
+        WHERE Name LIKE ? OR [Key] LIKE ? OR CAST(SystemID AS varchar) = ?
+    """
+    _, rows = await execute_query(sql_lookup, (f"%{line}%", f"%{line}%", line))
+    if not rows:
+        return {"events": [], "count": 0, "message": f"No line config for '{line}'"}
+
+    oee_calc_id = rows[0][0]
+
+    # Time handling
+    time_info = None
+    actual_start = start_date
+    actual_end = end_date
+    if time_service:
+        resolution = await time_service.resolve(f"{start_date} to {end_date}", table="tEvent")
+        time_info = resolution
+        actual_start = resolution["actual"]["start"]
+        actual_end = resolution["actual"]["end"]
+
+    safe_limit = max(1, min(int(limit), 500))
+
+    sql = f"""
+        SELECT TOP {safe_limit}
+            e.ID AS event_id,
+            e.StartDateTime,
+            e.EndDateTime,
+            DATEDIFF(second, e.StartDateTime, e.EndDateTime) AS duration_seconds,
+            ed.Name AS event_name,
+            ed.Description AS event_description,
+            e.Impact AS impact_seconds,
+            e.Count AS event_count,
+            e.Notes
+        FROM tEvent e
+        INNER JOIN tEventDefinition ed ON e.EventDefinitionID = ed.ID
+        WHERE e.StartDateTime >= ?
+          AND e.EndDateTime   <= ?
+          AND ed.SystemID = (SELECT SystemID FROM tOeeCalculation WHERE ID = ?)
+        ORDER BY e.StartDateTime DESC
+    """
+    params = (actual_start, actual_end, oee_calc_id)
+    columns, rows = await execute_query(sql, params)
+    events = rows_to_dicts(columns, rows)
+
+    return {
+        "events": events,
+        "count": len(events),
+        "tables_used": ["tEvent", "tEventDefinition", "tOeeCalculation"],
+        "logic": "Joined real events (tEvent) to their definitions (tEventDefinition) "
+                 "and filtered by the line's OEE configuration. Shows exact downtime "
+                 "that affected Availability and Quality.",
+        "time_info": time_info
+    }
