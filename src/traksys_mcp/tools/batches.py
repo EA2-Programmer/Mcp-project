@@ -1,421 +1,318 @@
-"""
-Batch-related MCP tools.
-
-Class-based composition - each tool domain is a separate class
-that registers its tools with the FastMCP instance.
-"""
-
 import logging
 from typing import TYPE_CHECKING
 
-from src.traksys_mcp.core.exceptions import ValidationError, TrakSYSError, SecurityError
-
 from src.traksys_mcp.models.tool_outputs import ToolResponse
 from src.traksys_mcp.services import batches
+from src.traksys_mcp.models.tool_inputs import (
+    GetBatchesInput,
+    GetBatchParametersInput,
+    GetBatchMaterialsInput,
+    GetBatchDetailsInput,
+    GetBatchQualityAnalysisInput,
+)
 
 if TYPE_CHECKING:
     from fastmcp import FastMCP
-    from src.traksys_mcp.services.time_resolution import TimeResolutionService, logger
+    from src.traksys_mcp.services.time_resolution import TimeResolutionService
+    from src.traksys_mcp.services.langfuse_tracing import TracingService
+
+
+def _build_response(data, time_info, no_data_suggestions: list[str]) -> ToolResponse:
+    """Return no_data / partial / success based on data presence and fallback state."""
+    if not data:
+        return ToolResponse.no_data(suggestions=no_data_suggestions, time_info=time_info)
+    if time_info and time_info.get("fallback_triggered"):
+        return ToolResponse.partial(data=data, time_info=time_info, message=time_info.get("message"))
+    return ToolResponse.success(data=data, time_info=time_info)
 
 
 class BatchTools:
-    """
-    Batch tool collection.
+    """Batch-related MCP tools with tracing and time resolution injected."""
 
-    Encapsulates all batch-related MCP tools and their logic.
-    Uses dependency injection for services.
-    """
-
-    def __init__(self, mcp: "FastMCP", time_service: "TimeResolutionService"):
-        """
-        Initialize batch tools.
-
-        Args:
-            mcp: FastMCP instance to register tools with
-            time_service: TimeResolutionService for date handling
-        """
+    def __init__(self, mcp: "FastMCP", time_service: "TimeResolutionService", tracing: "TracingService"):
         self.mcp = mcp
         self.time_service = time_service
+        self.tracing = tracing
         self.logger = logging.getLogger(__name__)
 
     def register(self) -> None:
-        """Register all batch tools with the MCP server."""
         self._register_get_batches()
         self._register_get_batch_parameters()
         self._register_get_batch_materials()
-        self._register_get_batch_quality()
+        self._register_get_batch_details()
+        self._register_get_batch_quality_analysis()
 
     def _register_get_batches(self) -> None:
-        """Register the get_batches tool."""
 
         @self.mcp.tool(
             name="get_batches",
-            description="""Get batch information from the TrakSYS manufacturing system.
+            description="""Query production batches with flexible filtering and time intelligence.
 
 **Use this tool when the user asks about:**
-- Production orders or batches on a specific line/system
-- Batch details by ID
-- Batches within a date range
-- Recent production runs
-- Batch quantities, timing, and status
+- "Show me all batches from yesterday"
+- "What batches ran on line E1 last week?"
+- "Find batch AA001"
+- "List batches for product P00001 this month"
+- "Show me all batches in September"
+- "Which batches ran more than 4 hours?"
+- "How many batches completed last week?"
 
-**Intelligent time handling:**
-The tool supports natural language time expressions like "yesterday" or
-"last 7 days". If the requested dates don't exist in the database, the
-system automatically falls back to the nearest available data and explains
-what happened.
+**No batch ID required** — omit batch_id and batch_name to query across a time window or line.
 
-**Returns:**
-- Batch ID, name, system/line, job info, product details
-- Start/end times, planned vs actual quantities
-- State/status information
-- If time fallback occurred, includes explanation message
-
-**Examples:**
-- "Show me batches from yesterday" → falls back to most recent data
-- "Get batches for System ID 5 in last 7 days"
-- "Find batch ID 1234"
+**Key Parameters:**
+- `time_window`: Natural language time (e.g., 'yesterday', 'last 7 days')
+- `batch_name`: Human-readable batch code (e.g., 'AA001') — optional
+- `system_name`: Filter by production line name (e.g., 'E1') — optional
 """
         )
-        async def get_batches(
-                batch_id: int | None = None,
-                batch_name: str | None = None,
-                system_id: int | None = None,
-                job_id: int | None = None,
-                time_window: str | None = None,
-                start_date: str | None = None,
-                end_date: str | None = None,
-                state: int | None = None,
-                limit: int = 50,
-        ) -> dict:
-            try:
-                result = await batches.get_batches(
-                    batch_id=batch_id,
-                    batch_name=batch_name,
-                    system_id=system_id,
-                    job_id=job_id,
-                    time_window=time_window,
-                    start_date=start_date,
-                    end_date=end_date,
-                    state=state,
-                    limit=limit,
-                    time_service=self.time_service,
-                )
-                batch_list = result["batches"]
-                time_info = result.get("time_info")
-
-                if not batch_list:
-                    return ToolResponse.no_data(
-                        suggestions=[
-                            "No batches found for this period",
-                            "Try a broader time window",
-                            "Verify system_id or batch_id is correct",
+        async def get_batches(params: GetBatchesInput) -> dict:
+            inputs = params.model_dump()
+            async with self.tracing.trace_tool("get_batches", inputs) as span:
+                try:
+                    result = await batches.get_batches(
+                        time_service=self.time_service, trace_span=span, **inputs,
+                    )
+                    response = _build_response(
+                        data=result["batches"],
+                        time_info=result.get("time_info"),
+                        no_data_suggestions=[
+                            "Try a broader time_window like 'last 30 days'",
+                            "Verify the batch_name or batch_id is correct",
+                            "Check if the system_id matches a valid production line",
                         ],
-                        time_info=time_info,
+                    )
+                    self.tracing.set_output(span, response.to_dict())
+                    return response.to_dict()
+                except Exception as e:
+                    self.tracing.record_error(span, e, "get_batches")
+                    self.logger.error("get_batches failed: %s", e, exc_info=True)
+                    return ToolResponse.error(
+                        message=str(e),
+                        suggestions=[
+                            "Check the database connection",
+                            "Verify time_window format (e.g., 'last 7 days')",
+                            "Try with just a batch_name or batch_id",
+                        ],
                     ).to_dict()
-
-                if time_info and time_info.get("fallback_triggered"):
-                    return ToolResponse.partial(
-                        data=batch_list,
-                        time_info=time_info,
-                        message=time_info.get("message"),
-                    ).to_dict()
-
-                return ToolResponse.success(
-                    data=batch_list,
-                    time_info=time_info,
-                ).to_dict()
-
-            except SecurityError as e:
-                return ToolResponse.error(
-                    message=f"Query blocked: {e}",
-                ).to_dict()
-            except TrakSYSError as e:
-                self.logger.error("get_batches error: %s", e, exc_info=True)
-                return ToolResponse.error(message=str(e)).to_dict()
-            except Exception as e:
-                self.logger.error("get_batches unexpected error: %s", e, exc_info=True)
-                return ToolResponse.error(
-                    message=str(e),
-                    suggestions=[
-                        "Verify system_id or batch_id is correct",
-                        "Try 'last 7 days' or a specific date range",
-                        "Check database connection",
-                    ],
-                ).to_dict()
 
     def _register_get_batch_parameters(self) -> None:
-        """Register the get_batch_parameters tool."""
 
         @self.mcp.tool(
             name="get_batch_parameters",
-            description="""Get process parameters (temperature, pressure, speed, etc.) for one or more batches.
+            description="""Retrieve process parameters (temperature, pressure, speed, etc.) recorded during a batch.
 
-**Use when the user asks about:**
-- Parameter values & deviations for a specific batch
-- All deviations in a time period (Q2)
-- Performance component data (Q6)
-- "Show me temperature & pressure for Batch AA001"
-- "Were there any deviations yesterday?"
+**Use this tool when the user asks about:**
+- "What were the process parameters for batch AA001?"
+- "Show me any out-of-spec readings for last week's batches"
+- "Were there any temperature deviations on line E1 yesterday?"
+- "Show me all parameter deviations in September"
+- "Which parameters were out of spec last month?"
 
-**Important usage notes:**
-- If the user gives a batch **name or code** (e.g. 'AA001') → use `batch_name`
-- If the user gives a **numeric ID** (e.g. 456) → use `batch_id`
+**No batch ID required** — use time_window to query across a date range without specifying a batch.
 
-**Intelligent time handling:**
-Supports natural language + automatic fallback to available data.
-
-**Deviation detection:**
-Uses tParameterDefinition.MinimumValue / MaximumValue.
-
-**Primary tables:** tBatchParameter, tBatch, tParameterDefinition
+**Key Parameters:**
+- `deviation_only`: True returns only out-of-spec readings
+- `parameter_names`: Filter to specific parameters (e.g., ['Temperature', 'Pressure'])
+- `time_window`: Natural language time (e.g., 'last 7 days')
 """
         )
-        async def get_batch_parameters(
-                batch_id: int | None = None,
-                batch_name: str | None = None,
-                parameter_names: list[str] | None = None,
-                deviation_only: bool = False,
-                time_window: str | None = None,
-                start_date: str | None = None,
-                end_date: str | None = None,
-                limit: int = 100,
-        ) -> dict:
-            try:
-                result = await batches.get_batch_parameters(
-                    batch_id=batch_id,
-                    batch_name=batch_name,
-                    parameter_names=parameter_names,
-                    deviation_only=deviation_only,
-                    time_window=time_window,
-                    start_date=start_date,
-                    end_date=end_date,
-                    limit=limit,
-                    time_service=self.time_service,
-                )
-                param_list = result["parameters"]
-                time_info = result.get("time_info")
-
-                if not param_list:
-                    return ToolResponse.no_data(
-                        suggestions=[
-                            "No parameters found for this batch",
-                            "Verify batch_id or batch_name is correct",
-                            "Try deviation_only=false to see all parameters",
+        async def get_batch_parameters(params: GetBatchParametersInput) -> dict:
+            inputs = params.model_dump()
+            async with self.tracing.trace_tool("get_batch_parameters", inputs) as span:
+                try:
+                    result = await batches.get_batch_parameters(
+                        time_service=self.time_service, trace_span=span, **inputs,
+                    )
+                    response = _build_response(
+                        data=result["parameters"],
+                        time_info=result.get("time_info"),
+                        no_data_suggestions=[
+                            "Verify the batch_id or batch_name is correct",
+                            "Try without deviation_only=true to see all parameters",
+                            "Check if parameter_names match exact names in tParameterDefinition",
                         ],
-                        time_info=time_info,
+                    )
+                    self.tracing.set_output(span, response.to_dict())
+                    return response.to_dict()
+                except Exception as e:
+                    self.tracing.record_error(span, e, "get_batch_parameters")
+                    self.logger.error("get_batch_parameters failed: %s", e, exc_info=True)
+                    return ToolResponse.error(
+                        message=str(e),
+                        suggestions=[
+                            "Verify the batch_id or batch_name",
+                            "Check if tBatchParameter table is accessible",
+                        ],
                     ).to_dict()
-
-                if time_info and time_info.get("fallback_triggered"):
-                    return ToolResponse.partial(
-                        data=param_list,
-                        time_info=time_info,
-                        message=time_info.get("message"),
-                    ).to_dict()
-
-                return ToolResponse.success(
-                    data=param_list,
-                    time_info=time_info,
-                ).to_dict()
-
-            except SecurityError as e:
-                return ToolResponse.error(message=f"Query blocked: {e}").to_dict()
-            except TrakSYSError as e:
-                self.logger.error("get_batch_parameters error: %s", e, exc_info=True)
-                return ToolResponse.error(message=str(e)).to_dict()
-            except Exception as e:
-                self.logger.error("get_batch_parameters unexpected error: %s", e, exc_info=True)
-                return ToolResponse.error(
-                    message="Unexpected error occurred",
-                    suggestions=[
-                        "Verify batch_id or batch_name exists",
-                        "Try deviation_only=true to filter deviations only",
-                        "Check database connection",
-                    ],
-                ).to_dict()
 
     def _register_get_batch_materials(self) -> None:
-        """Register the get_batch_materials tool."""
 
         @self.mcp.tool(
             name="get_batch_materials",
-            description="""Get actual material consumption / usage for batches.
+            description="""Retrieve actual material consumption/usage for a batch or date range.
 
-**Use when asked about:**
-- Materials used in a specific batch
-- Raw material consumption over time
-- "What materials were used in batch XYZ?"
-- "Show material usage last week"
-- Over/under consumption compared to planned
+**Use this tool when the user asks about:**
+- "What materials were used in batch AA001?"
+- "How much Sugar was consumed last week?"
+- "Show material usage for job 12345"
+- "What materials were consumed last week across all batches?"
+- "Show me all material usage in September"
 
-**Important usage notes:**
-- If the user gives a batch **name or code** (e.g. 'AA001') → use `batch_name`
-- If the user gives a **numeric ID** (e.g. 456) → use `batch_id`
+**No batch ID required** — use time_window to query consumption across a date range.
 
-**Intelligent time handling:**
-Supports natural language time expressions with automatic fallback.
-Can filter by material name or code.
+**Key Parameters:**
+- `batch_name` or `batch_id`: Identifies the batch — both optional
+- `time_window`: Natural language time (e.g., 'last 7 days')
+- `material_names`: Filter to specific materials (e.g., ['Sugar', 'Water'])
+- `material_codes`: Filter by material codes (e.g., ['MAT-001'])
 
-**Primary tables:** tMaterialUseActual, tBatch, tMaterial
+**Note on units:** Quantities are in KGR (Kilogram Reactive — pharmaceutical unit, not standard KG).
+**Note on silos:** Silo source not available yet (SAP integration pending).
 """
         )
-        async def get_batch_materials(
-                batch_id: int | None = None,
-                batch_name: str | None = None,
-                job_id: int | None = None,
-                material_names: list[str] | None = None,
-                material_codes: list[str] | None = None,
-                time_window: str | None = None,
-                start_date: str | None = None,
-                end_date: str | None = None,
-                limit: int = 100,
-        ) -> dict:
-            try:
-                result = await batches.get_batch_materials(
-                    batch_id=batch_id,
-                    batch_name=batch_name,
-                    job_id=job_id,
-                    material_names=material_names,
-                    material_codes=material_codes,
-                    time_window=time_window,
-                    start_date=start_date,
-                    end_date=end_date,
-                    limit=limit,
-                    time_service=self.time_service,
-                )
-                mat_list = result["materials"]
-                time_info = result.get("time_info")
-
-                if not mat_list:
-                    return ToolResponse.no_data(
-                        suggestions=[
-                            "No materials found for this batch",
-                            "Verify batch_id or batch_name is correct",
-                            "Check tMaterialUseActual is populated",
-                        ],
-                        time_info=time_info,
-                    ).to_dict()
-
-                if time_info and time_info.get("fallback_triggered"):
-                    return ToolResponse.partial(
-                        data=mat_list,
-                        time_info=time_info,
-                        message=time_info.get("message"),
-                    ).to_dict()
-
-                return ToolResponse.success(
-                    data=mat_list,
-                    time_info=time_info,
-                ).to_dict()
-
-            except SecurityError as e:
-                return ToolResponse.error(message=f"Query blocked: {e}").to_dict()
-            except TrakSYSError as e:
-                self.logger.error("get_batch_materials error: %s", e, exc_info=True)
-                return ToolResponse.error(message=str(e)).to_dict()
-            except Exception as e:
-                self.logger.error("get_batch_materials unexpected error: %s", e, exc_info=True)
-                return ToolResponse.error(
-                    message="Unexpected error occurred",
-                    suggestions=[
-                        "Verify batch_id or batch_name exists",
-                        "Check material name or code spelling",
-                        "Check database connection",
-                    ],
-                ).to_dict()
-
-    def _register_get_batch_quality(self) -> None:
-            """Register the get_batch_quality tool."""
-
-            @self.mcp.tool(
-                name="get_batch_quality",
-                description="""Get quality loss events for batches — quantities rejected, root cause categories, and category groups.
-
-        Use this tool when the user asks about:
-        - Which batches had quality losses or rejects in a time period (Q7)
-        - Root causes of quality rejects for a specific product (Q8)
-        - Quality loss quantities per batch or production line
-        - Most common reject categories this week/month/quarter
-
-        Supports natural language time: 'last 10 days', 'this quarter', 'yesterday'.
-        Falls back to nearest available data if requested dates have no records.
-
-        For process parameter deviations (temperature, pressure, speed) use get_batch_parameters instead.
-        """,
-            )
-            async def get_batch_quality(
-                    batch_id: int | None = None,
-                    product_name: str | None = None,
-                    system_id: int | None = None,
-                    time_window: str | None = None,
-                    start_date: str | None = None,
-                    end_date: str | None = None,
-                    category_filter: list[str] | None = None,
-                    limit: int = 50,
-            ) -> dict:
+        async def get_batch_materials(params: GetBatchMaterialsInput) -> dict:
+            inputs = params.model_dump()
+            async with self.tracing.trace_tool("get_batch_materials", inputs) as span:
                 try:
-                    result = await batches.get_batch_quality(
-                        batch_id=batch_id,
-                        product_name=product_name,
-                        system_id=system_id,
-                        time_window=time_window,
-                        start_date=start_date,
-                        end_date=end_date,
-                        category_filter=category_filter,
-                        limit=limit,
-                        time_service=self.time_service,
+                    result = await batches.get_batch_materials(
+                        time_service=self.time_service, trace_span=span, **inputs,
                     )
-
-                    events = result["quality_events"]
-                    time_info = result.get("time_info")
-
-                    if not events:
-                        return ToolResponse.no_data(
-                            suggestions=[
-                                "No quality loss records found for this period",
-                                "Try a broader time window",
-                                "Verify product_name or category_filter spelling",
-                                "Quality loss data may not yet be recorded for these batches",
-                            ],
-                            time_info=time_info,
-                        ).to_dict()
-
-                    if time_info and time_info.get("fallback_triggered"):
-                        return ToolResponse.partial(
-                            data=events,
-                            time_info=time_info,
-                            message=time_info.get("message"),
-                        ).to_dict()
-
-                    return ToolResponse.success(
-                        data=events,
-                        time_info=time_info,
-                    ).to_dict()
-
-                except SecurityError as e:
-                    return ToolResponse.error(
-                        message=f"Query blocked: {e}",
-                        suggestions=["Check input parameters for invalid characters"],
-                    ).to_dict()
-                except ValidationError as e:
-                    return ToolResponse.error(
-                        message=f"Invalid input: {e}",
-                        suggestions=["Verify batch_id is an integer, limit is between 1-500"],
-                    ).to_dict()
-                except TrakSYSError as e:
-                    logger.error("get_batch_quality error: %s", e, exc_info=True)
+                    response = _build_response(
+                        data=result["materials"],
+                        time_info=result.get("time_info"),
+                        no_data_suggestions=[
+                            "Verify the batch_id, batch_name, or job_id is correct",
+                            "Check if tMaterialUseActual has records for this batch",
+                            "Try without material_names filter to see all materials",
+                        ],
+                    )
+                    self.tracing.set_output(span, response.to_dict())
+                    return response.to_dict()
+                except Exception as e:
+                    self.tracing.record_error(span, e, "get_batch_materials")
+                    self.logger.error("get_batch_materials failed: %s", e, exc_info=True)
                     return ToolResponse.error(
                         message=str(e),
-                    ).to_dict()
-                except Exception as e:
-                    logger.error("get_batch_quality unexpected error: %s", e, exc_info=True)
-                    return ToolResponse.error(
-                        message="Unexpected error occurred",
                         suggestions=[
-                            "Verify batch_id or system_id is correct",
-                            "Try a specific date range instead of time_window",
-                            "For parameter deviations use get_batch_parameters instead",
+                            "Ensure batch_id, batch_name, or job_id is provided",
+                            "Check tMaterialUseActual table accessibility",
                         ],
                     ).to_dict()
 
+    def _register_get_batch_details(self) -> None:
 
+        @self.mcp.tool(
+            name="get_batch_details",
+            description="""Get complete drill-down for a single batch: steps, operator remarks, and compliance tasks.
+
+**Use this tool when the user asks about:**
+- "Give me the full details for batch AA001"
+- "What steps were executed in batch 42?"
+- "Were all compliance tasks completed for this batch?"
+- "What did operators note during batch AA001?"
+
+**Returns four sections:**
+- `batch_info`: Core batch, job, product, and line data
+- `steps`: Every step executed with start/end times and duration
+- `operator_remarks`: Free-text notes entered by operators during the batch
+- `compliance_tasks`: Mandatory tasks and their pass/fail status
+"""
+        )
+        async def get_batch_details(params: GetBatchDetailsInput) -> dict:
+            inputs = params.model_dump()
+            async with self.tracing.trace_tool("get_batch_details", inputs) as span:
+                try:
+                    result = await batches.get_batch_details(trace_span=span, **inputs)
+                    response = (
+                        ToolResponse.no_data(
+                            suggestions=[
+                                "Verify the batch_id or batch_name is correct",
+                                "Try get_batches first to find valid batch IDs",
+                            ]
+                        )
+                        if not result.get("batch_info")
+                        else ToolResponse.success(data=result)
+                    )
+                    self.tracing.set_output(span, response.to_dict())
+                    return response.to_dict()
+                except Exception as e:
+                    self.tracing.record_error(span, e, "get_batch_details")
+                    self.logger.error("get_batch_details failed: %s", e, exc_info=True)
+                    return ToolResponse.error(
+                        message=str(e),
+                        suggestions=[
+                            "Verify the batch_id or batch_name is correct",
+                            "Ensure tBatchStep, _DBR, and tTask tables are accessible",
+                        ],
+                    ).to_dict()
+
+    def _register_get_batch_quality_analysis(self) -> None:
+
+        @self.mcp.tool(
+            name="get_batch_quality_analysis",
+            description="""Diagnoses quality issues for one or more batches using three independent signals.
+
+**METHODOLOGY — How quality is assessed:**
+
+Signal 1 — Parameter Deviations:
+Compares every recorded value in tBatchParameter against the min/max
+limits defined in tParameterDefinition. A parameter is flagged as
+deviated if its value falls outside these bounds.
+
+Signal 2 — Operator Remarks:
+Scans free-text notes recorded by operators in the _DBR table.
+Looks for keywords indicating problems (e.g. 'failed', 'deviation',
+'not checked', 'equipment issue').
+
+Signal 3 — Incomplete Mandatory Tasks:
+Checks tTask for compliance steps that were required but not completed.
+
+**A batch is flagged as problematic if ANY of the three signals triggers.**
+
+**Use this tool when the user asks:**
+- "Were there any quality issues with batch 462?"
+- "Why was batch 457 flagged?"
+- "Show me all batches with parameter deviations last week"
+- "Which batches had incomplete tasks in September?"
+- "What caused the quality problems on line E1?"
+
+**Key Parameters:**
+- `batch_id`: Single batch deep-dive
+- `time_window`: Analyse quality trends over a period (e.g. 'last 30 days')
+- `system_name`: Filter by production line (e.g. 'E1')
+- `limit`: Controls records per signal type independently
+"""
+        )
+        async def get_batch_quality_analysis(params: GetBatchQualityAnalysisInput) -> dict:
+            inputs = params.model_dump()
+            async with self.tracing.trace_tool("get_batch_quality_analysis", inputs) as span:
+                try:
+                    result = await batches.get_batch_quality_analysis(
+                        time_service=self.time_service, trace_span=span, **inputs,
+                    )
+                    response = _build_response(
+                        data=result if result.get("total_quality_signals", 0) > 0 else None,
+                        time_info=result.get("time_info"),
+                        no_data_suggestions=[
+                            "No quality signals found — this batch may have run cleanly",
+                            "Try a broader time_window or different product_name",
+                            "Verify batch_id or batch_name is correct",
+                        ],
+                    )
+                    # When there are signals but no fallback, success needs the full result
+                    if result.get("total_quality_signals", 0) > 0 and not (
+                        result.get("time_info") and result["time_info"].get("fallback_triggered")
+                    ):
+                        response = ToolResponse.success(data=result, time_info=result.get("time_info"))
+                    self.tracing.set_output(span, response.to_dict())
+                    return response.to_dict()
+                except Exception as e:
+                    self.tracing.record_error(span, e, "get_batch_quality_analysis")
+                    self.logger.error("get_batch_quality_analysis failed: %s", e, exc_info=True)
+                    return ToolResponse.error(
+                        message=str(e),
+                        suggestions=[
+                            "Check that tBatchParameter, _DBR, and tTask are accessible",
+                            "Verify product_name matches exactly (case-sensitive)",
+                        ],
+                    ).to_dict()

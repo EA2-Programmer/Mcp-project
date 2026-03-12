@@ -1,52 +1,28 @@
-"""
-Health check utilities for monitoring server status.
+from datetime import datetime, timezone
+from typing import Any
 
-Provides functions for:
-- Liveness probes (is the server running?)
-- Readiness probes (is the server ready to handle requests?)
-"""
+import logging
 
 from src.traksys_mcp.core.database import check_connection
-from typing import Dict, Any
-from datetime import datetime, timezone
-import logging
 
 logger = logging.getLogger(__name__)
 
 
-async def health_check() -> Dict[str, Any]:
-    """
-    Liveness probe - check if server is running.
-
-    This is a simple check that the server process is alive.
-    It does NOT check external dependencies.
-
-    Returns:
-        Health status dict with timestamp
-    """
+async def health_check() -> dict[str, Any]:
+    """Liveness probe — confirms the server process is alive, no external checks."""
     return {
         "status": "alive",
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "server": "TrakSYS MCP",
-        "version": "1.0.0"
+        "version": "1.0.0",
     }
 
 
-async def readiness_check() -> Dict[str, Any]:
-    """
-    Readiness probe - check if server can handle requests.
-
-    This checks that all dependencies (database, etc.) are available.
-    Use this to determine if the server should receive traffic.
-
-    Returns:
-        Readiness status dict with dependency checks
-    """
+async def readiness_check() -> dict[str, Any]:
+    """Readiness probe — confirms all dependencies (database) are reachable."""
     is_db_ready = await check_connection()
-    is_ready = is_db_ready  # Can add more checks here later
-
     return {
-        "status": "ready" if is_ready else "not_ready",
+        "status": "ready" if is_db_ready else "not_ready",
         "checks": {
             "database": "connected" if is_db_ready else "disconnected"
         },

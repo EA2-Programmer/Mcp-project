@@ -6,6 +6,7 @@ pandas>=2.0.0
 pytest>=7.0.0
 pytest-asyncio>=0.21.0
 python-dateutil>=2.8.2
+langfuse>=3.0.0,<4.0.0
 
 
 

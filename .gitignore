@@ -11,10 +11,17 @@ wheels/
 .venv/
 venv/
 env/
+docs/MYREF2.md
+docs/MYREF.md
 
+langfuse/
+.langfuse/
+.langfuse
 
-
+.env.docker
 .env
+*.env
+
 *.key
 *.pem
 
