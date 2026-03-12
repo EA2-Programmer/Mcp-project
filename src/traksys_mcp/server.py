@@ -18,6 +18,10 @@ from src.traksys_mcp.services.data_availability import DataAvailabilityCache
 from src.traksys_mcp.services.time_resolution import TimeResolutionService
 from src.traksys_mcp.tools.batches import BatchTools
 from src.traksys_mcp.tools.performance import PerformanceTools
+# NEW: Import the Analysis/OEE tools class
+from src.traksys_mcp.tools.Analysis import AnalysisTools
+# NEW: Import the Materials tools class (now registers BOTH tools)
+from src.traksys_mcp.tools.materials import MaterialsTools
 
 
 class TrakSYSMCPServer:
@@ -39,6 +43,10 @@ class TrakSYSMCPServer:
         # Tools (registered after services are ready)
         self.batch_tools: Optional[BatchTools] = None
         self.performance_tools: Optional[PerformanceTools] = None
+        # NEW: Placeholder for OEE tools
+        self.oee_tools: Optional[AnalysisTools] = None
+        # NEW: Placeholder for Materials tools (contains get_materials + get_products_using_materials)
+        self.materials_tools: Optional[MaterialsTools] = None
 
     def setup_logging(self) -> None:
         """Initialize logging configuration."""
@@ -100,19 +108,28 @@ class TrakSYSMCPServer:
         )
         self.performance_tools.register()
 
-        # Add more tool registrations as they're built:
+        # NEW: Register OEE/Analysis tools
+        self.oee_tools = AnalysisTools(
+            mcp=self.mcp,
+            time_service=self.time_service
+        )
+        self.oee_tools.register()
 
-        self.logger.info("✓ Tools registered")
+        # NEW: Register materials tools
+        # This single class now registers BOTH tools:
+        #   - get_materials
+        #   - get_products_using_materials
+        self.materials_tools = MaterialsTools(
+            mcp=self.mcp,
+            time_service=self.time_service
+        )
+        self.materials_tools.register()
+
+        self.logger.info("✓ Tools registered (including both materials tools)")
 
     async def run(self) -> None:
         """
         Run the MCP server.
-
-        Lifecycle:
-        1. Setup logging
-        2. Initialize services (async)
-        3. Register tools
-        4. Start transport (stdio or HTTP)
         """
         # Setup
         self.setup_logging()
@@ -143,8 +160,6 @@ class TrakSYSMCPServer:
         """Run server with STDIO transport."""
         self.logger.info("Starting MCP server with STDIO transport")
         self.logger.info("Server is ready and waiting for requests...")
-
-        # FastMCP handles the async stdio loop
         await self.mcp.run_stdio_async()
 
     async def _run_http(self) -> None:
@@ -154,9 +169,6 @@ class TrakSYSMCPServer:
             settings.HTTP_BIND_HOST,
             settings.HTTP_BIND_PORT
         )
-
-        # FastMCP handles the HTTP server (uvicorn + Starlette)
-        # Pass host and port directly to the async run method
         await self.mcp.run_http_async(
             host=settings.HTTP_BIND_HOST,
             port=settings.HTTP_BIND_PORT
@@ -164,12 +176,7 @@ class TrakSYSMCPServer:
 
 
 def create_server() -> TrakSYSMCPServer:
-    """
-    Factory function to create the MCP server.
-
-    Returns:
-        Configured TrakSYSMCPServer instance
-    """
+    """Factory function to create the MCP server."""
     return TrakSYSMCPServer()
 
 

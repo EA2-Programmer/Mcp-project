@@ -247,4 +247,34 @@ class GetEquipmentStateInput(BaseModel):
         le=500,
         description="Maximum number of records to return."
     )
+
+
+
+class CalculateOEEInput(BaseModel):
+    """Input schema for calculate_oee tool."""
+
+    line: Optional[str] = Field(
+        None,
+        description="Equipment/line name (tSystem.Name). Example: 'E1'. If omitted, aggregates across all lines."
+    )
+
+    start_date: str = Field(
+        ...,
+        description="Explicit start date in ISO format (YYYY-MM-DD). Required."
+    )
+
+    end_date: str = Field(
+        ...,
+        description="Explicit end date in ISO format (YYYY-MM-DD). Required."
+    )
+
+    granularity: Optional[str] = Field(
+        default="daily",
+        description="How to group results: 'daily', 'weekly', 'shift'."
+    )
+
+    breakdown: bool = Field(
+        default=True,
+        description="If true, includes Availability, Performance, Quality components separately."
+    )
     
