@@ -4,7 +4,7 @@ from typing import Any
 from src.traksys_mcp.core.database import execute_query
 from src.traksys_mcp.core.utils import rows_to_dicts
 from src.traksys_mcp.services.time_resolution import TimeResolutionService
-from src.traksys_mcp.queries.batches import (
+from src.traksys_mcp.utils.batch_queries import (
     BATCH_NAME_LOOKUP,
     SYSTEM_NAME_LOOKUP,
     BATCH_JOB_LOOKUP,

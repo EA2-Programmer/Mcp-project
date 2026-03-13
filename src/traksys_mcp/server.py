@@ -107,21 +107,16 @@ class TrakSYSMCPServer:
         self.logger.info("✓ Tools registered (including both materials tools)")
 
     async def run(self) -> None:
-        self._setup_logging()
-        try:
-            await self.initialize()
-            self.register_tools()
         """
         Run the MCP server.
         """
-        # Setup
-        self.setup_logging()
+        self._setup_logging()
+        try:
+            # Initialize services
+            await self.initialize()
 
-        # Initialize services
-        await self.initialize()
-
-        # Register tools
-        self.register_tools()
+            # Register tools
+            self.register_tools()
 
             self.logger.info("=" * 60)
             self.logger.info("Configuration:")
