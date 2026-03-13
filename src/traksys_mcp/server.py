@@ -1,9 +1,3 @@
-"""
-TrakSYS MCP Server bootstrap and lifecycle management.
-
-Class-based architecture with proper dependency injection.
-"""
-
 import asyncio
 import logging
 from typing import Optional
@@ -16,8 +10,11 @@ from src.traksys_mcp.core.database import check_connection
 from src.traksys_mcp.core.exceptions import DatabaseConnectionError
 from src.traksys_mcp.services.data_availability import DataAvailabilityCache
 from src.traksys_mcp.services.time_resolution import TimeResolutionService
+from src.traksys_mcp.services.langfuse_tracing import TracingService, register_instance
 from src.traksys_mcp.tools.batches import BatchTools
 from src.traksys_mcp.tools.performance import PerformanceTools
+from src.traksys_mcp.tools.meta import MetaTools
+from src.traksys_mcp.tools.tasks import TaskTools
 # NEW: Import the Analysis/OEE tools class
 from src.traksys_mcp.tools.Analysis import AnalysisTools
 # NEW: Import the Materials tools class (now registers BOTH tools)
@@ -25,31 +22,24 @@ from src.traksys_mcp.tools.materials import MaterialsTools
 
 
 class TrakSYSMCPServer:
-    """
-    Main MCP server class.
-
-    Handles initialization, dependency injection, and lifecycle management.
-    """
+    """Main server class — owns service lifecycle and tool registration."""
 
     def __init__(self):
-        """Initialize server with empty state."""
         self.logger = logging.getLogger(__name__)
         self.mcp: Optional[FastMCP] = None
-
-        # Services (injected after async initialization)
         self.data_cache: Optional[DataAvailabilityCache] = None
         self.time_service: Optional[TimeResolutionService] = None
-
-        # Tools (registered after services are ready)
+        self.tracing: Optional[TracingService] = None
         self.batch_tools: Optional[BatchTools] = None
         self.performance_tools: Optional[PerformanceTools] = None
+        self.meta_tools: Optional[MetaTools] = None
+        self.task_tools: Optional[TaskTools] = None
         # NEW: Placeholder for OEE tools
         self.oee_tools: Optional[AnalysisTools] = None
         # NEW: Placeholder for Materials tools (contains get_materials + get_products_using_materials)
         self.materials_tools: Optional[MaterialsTools] = None
 
-    def setup_logging(self) -> None:
-        """Initialize logging configuration."""
+    def _setup_logging(self) -> None:
         setup_logging()
         self.logger.info("=" * 60)
         self.logger.info("TrakSYS MCP Server v1.0.0")
@@ -57,57 +47,47 @@ class TrakSYSMCPServer:
 
     async def initialize(self) -> None:
         """
-        Async initialization of services and dependencies.
-
-        This runs BEFORE tools are registered.
+        Async service initialization. Order matters:
+            1. TracingService  — no deps; must be first so the DB health check can be traced
+            2. Database check  — verifies connectivity before anything queries the DB
+            3. DataCache       — queries DB for available date ranges
+            4. TimeService     — depends on cache
         """
         self.logger.info("Initializing TrakSYS services...")
 
-        # Check database connectivity
-        self.logger.info("Checking database connection...")
+        self.tracing = TracingService()
+        register_instance(self.tracing)
+        self.logger.info("✓ Tracing service ready (enabled=%s)", self.tracing.enabled)
+
         if not await check_connection():
             raise DatabaseConnectionError(
                 "Cannot reach database. Check MSSQL_CONNECTION_STRING in .env"
             )
         self.logger.info("✓ Database connection verified")
 
-        # Initialize data availability cache
-        self.logger.info("Initializing data availability cache...")
         self.data_cache = DataAvailabilityCache()
         await self.data_cache.refresh_all()
         self.logger.info("✓ Data cache ready")
 
-        # Initialize time resolution service (depends on cache)
         self.time_service = TimeResolutionService(self.data_cache)
         self.logger.info("✓ Time resolution service ready")
 
         self.logger.info("All services initialized successfully")
 
     def register_tools(self) -> None:
-        """
-        Register all MCP tools with the FastMCP instance.
-
-        Uses composition - each tool domain is a separate class.
-        """
-        self.logger.info("Registering MCP tools...")
-
-        # Create FastMCP instance
         self.mcp = FastMCP("TrakSYS Manufacturing Analytics")
 
-        # Register batch tools
-        self.batch_tools = BatchTools(
-            mcp=self.mcp,
-            time_service=self.time_service
-        )
+        self.batch_tools = BatchTools(mcp=self.mcp, time_service=self.time_service, tracing=self.tracing)
         self.batch_tools.register()
 
-        # Register performance tools
-        self.performance_tools = PerformanceTools(
-            mcp=self.mcp,
-            time_service=self.time_service
-        )
+        self.performance_tools = PerformanceTools(mcp=self.mcp, time_service=self.time_service, tracing=self.tracing)
         self.performance_tools.register()
 
+        self.meta_tools = MetaTools(mcp=self.mcp, tracing=self.tracing)
+        self.meta_tools.register()
+
+        self.task_tools = TaskTools(mcp=self.mcp, time_service=self.time_service, tracing=self.tracing)
+        self.task_tools.register()
         # NEW: Register OEE/Analysis tools
         self.oee_tools = AnalysisTools(
             mcp=self.mcp,
@@ -127,6 +107,10 @@ class TrakSYSMCPServer:
         self.logger.info("✓ Tools registered (including both materials tools)")
 
     async def run(self) -> None:
+        self._setup_logging()
+        try:
+            await self.initialize()
+            self.register_tools()
         """
         Run the MCP server.
         """
@@ -139,50 +123,45 @@ class TrakSYSMCPServer:
         # Register tools
         self.register_tools()
 
-        # Log configuration
-        self.logger.info("=" * 60)
-        self.logger.info("Configuration:")
-        self.logger.info("  Transport: %s", settings.SERVER_TRANSPORT)
-        self.logger.info("  Read-only: %s", settings.READ_ONLY)
-        self.logger.info("  Max rows: %d", settings.MAX_ROWS)
-        self.logger.info("=" * 60)
+            self.logger.info("=" * 60)
+            self.logger.info("Configuration:")
+            self.logger.info("  Transport: %s", settings.SERVER_TRANSPORT)
+            self.logger.info("  Read-only: %s", settings.READ_ONLY)
+            self.logger.info("  Max rows:  %d", settings.MAX_ROWS)
+            self.logger.info("  Tracing:   %s", self.tracing.enabled if self.tracing else False)
+            self.logger.info("=" * 60)
 
-        # Start server based on transport
-        if settings.SERVER_TRANSPORT == "stdio":
-            await self._run_stdio()
-        elif settings.SERVER_TRANSPORT == "http":
-            await self._run_http()
-        else:
-            raise ValueError(f"Unknown transport: {settings.SERVER_TRANSPORT}")
+            if settings.SERVER_TRANSPORT == "stdio":
+                await self._run_stdio()
+            elif settings.SERVER_TRANSPORT == "http":
+                await self._run_http()
+            else:
+                raise ValueError(f"Unknown transport: {settings.SERVER_TRANSPORT}")
+
+        finally:
+            # Flush queued Langfuse events before process exits — background threads
+            # may not finish sending if we exit without this.
+            if self.tracing:
+                self.tracing.shutdown()
 
     async def _run_stdio(self) -> None:
-        """Run server with STDIO transport."""
         self.logger.info("Starting MCP server with STDIO transport")
-        self.logger.info("Server is ready and waiting for requests...")
         await self.mcp.run_stdio_async()
 
     async def _run_http(self) -> None:
-        """Run server with HTTP transport."""
         self.logger.info(
             "Starting MCP server with HTTP transport on %s:%d",
-            settings.HTTP_BIND_HOST,
-            settings.HTTP_BIND_PORT
+            settings.HTTP_BIND_HOST, settings.HTTP_BIND_PORT,
         )
-        await self.mcp.run_http_async(
-            host=settings.HTTP_BIND_HOST,
-            port=settings.HTTP_BIND_PORT
-        )
+        await self.mcp.run_http_async(host=settings.HTTP_BIND_HOST, port=settings.HTTP_BIND_PORT)
 
 
 def create_server() -> TrakSYSMCPServer:
-    """Factory function to create the MCP server."""
     return TrakSYSMCPServer()
 
 
 async def main() -> None:
-    """Main entry point for the server."""
     server = create_server()
-
     try:
         await server.run()
     except KeyboardInterrupt:

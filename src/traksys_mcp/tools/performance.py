@@ -12,18 +12,26 @@ from src.traksys_mcp.models.tool_inputs import GetEquipmentStateInput
 if TYPE_CHECKING:
     from fastmcp import FastMCP
     from src.traksys_mcp.services.time_resolution import TimeResolutionService
+    from src.traksys_mcp.services.langfuse_tracing import TracingService
 
 
 class PerformanceTools:
     """
     Performance tool collection.
 
-    Encapsulates all equipment and OEE related tools.
+    Encapsulates all equipment and OEE related tools with tracing injected
+    alongside TimeResolutionService.
     """
 
-    def __init__(self, mcp: "FastMCP", time_service: "TimeResolutionService"):
+    def __init__(
+        self,
+        mcp: "FastMCP",
+        time_service: "TimeResolutionService",
+        tracing: "TracingService",                                 # ← NEW
+    ):
         self.mcp = mcp
         self.time_service = time_service
+        self.tracing = tracing                                     # ← NEW
         self.logger = logging.getLogger(__name__)
 
     def register(self) -> None:
@@ -31,7 +39,6 @@ class PerformanceTools:
         self._register_get_equipment_state()
 
     def _register_get_equipment_state(self) -> None:
-        """Register the get_equipment_state tool."""
 
         @self.mcp.tool(
             name="get_equipment_state",
@@ -47,8 +54,8 @@ class PerformanceTools:
 **Intelligent Features:**
 - **Live Status**: Shows if a machine is 'Running' or 'Idle' based on open production sessions.
 - **Real-time Tags**: Can fetch live counts, product codes, and speeds directly from tTag.
-- **OEE & Availability**: Calculates runtime and session counts over any natural language time period (e.g., 'yesterday').
-- **Smart Fallback**: If requested dates have no data, it automatically finds the most recent available data.
+- **OEE & Availability**: Calculates runtime and session counts over any natural language time period.
+- **Smart Fallback**: If requested dates have no data, automatically finds the most recent available data.
 
 **Key Parameters:**
 - `system_name`: Human name of the machine (e.g., 'Packer 01').
@@ -56,48 +63,52 @@ class PerformanceTools:
 - `include_oee`: Set to true for downtime/availability analysis.
 """
         )
-        async def get_equipment_state(arguments: GetEquipmentStateInput) -> dict:
-            try:
-                result = await performance.get_equipment_state(
-                    time_service=self.time_service,
-                    **arguments.model_dump()
-                )
+        async def get_equipment_state(params: GetEquipmentStateInput) -> dict:
+            inputs = params.model_dump()
+            async with self.tracing.trace_tool("get_equipment_state", inputs) as span:
+                try:
+                    result = await performance.get_equipment_state(
+                        time_service=self.time_service,
+                        trace_span=span,                           # ← NEW
+                        **inputs,
+                    )
 
-                equipment_list = result["equipment"]
-                time_info = result.get("time_info")
+                    equipment_list = result["equipment"]
+                    time_info      = result.get("time_info")
 
-                if not equipment_list:
-                    return ToolResponse.no_data(
+                    if not equipment_list:
+                        response = ToolResponse.no_data(
+                            suggestions=[
+                                "Verify the system_name or system_id is correct",
+                                "Ensure the equipment is enabled in tSystem",
+                                "Try a broader area_id or time_window",
+                            ],
+                            time_info=time_info,
+                        )
+                    elif time_info and time_info.get("fallback_triggered"):
+                        response = ToolResponse.partial(
+                            data=equipment_list,
+                            time_info=time_info,
+                            message=time_info.get("message"),
+                        )
+                    else:
+                        response = ToolResponse.success(
+                            data=equipment_list,
+                            time_info=time_info,
+                        )
+
+                    self.tracing.set_output(span, response.to_dict())   # ← NEW
+                    return response.to_dict()
+
+                except Exception as e:
+                    self.tracing.record_error(span, e, "get_equipment_state")  # ← NEW
+                    self.logger.error("get_equipment_state failed: %s", e, exc_info=True)
+                    return ToolResponse.error(
+                        message=str(e),
                         suggestions=[
                             "Verify the system_name or system_id is correct",
-                            "Ensure the equipment is enabled in tSystem",
-                            "Try a broader area_id or time_window",
-                        ],
-                        time_info=time_info,
+                            "Check if the equipment is Enabled in tSystem",
+                            "Try 'last 7 days' to see historical performance",
+                            "Ensure tTag and tJobSystemActual tables are accessible",
+                        ]
                     ).to_dict()
-
-                if time_info and time_info.get("fallback_triggered"):
-                    response = ToolResponse.partial(
-                        data=equipment_list,
-                        time_info=time_info,
-                        message=time_info.get("message")
-                    )
-                else:
-                    response = ToolResponse.success(
-                        data=equipment_list,
-                        time_info=time_info
-                    )
-
-                return response.to_dict()
-
-            except Exception as e:
-                self.logger.error(f"get_equipment_state failed: {e}", exc_info=True)
-                return ToolResponse.error(
-                    message=str(e),
-                    suggestions=[
-                        "Verify the system_name or system_id is correct",
-                        "Check if the equipment is Enabled in tSystem",
-                        "Try 'last 7 days' to see historical performance",
-                        "Ensure tTag and tJobSystemActual tables are accessible"
-                    ]
-                ).to_dict()
