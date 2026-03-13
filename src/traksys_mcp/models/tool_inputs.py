@@ -103,6 +103,43 @@ class GetBatchTasksInput(BaseModel):
     end_date: Optional[str] = Field(None, description="Explicit end date (YYYY-MM-DD).")
     limit: int = Field(default=100, ge=1, le=1000, description="Maximum number of task records to return (1-1000).")
 
+    limit: int = Field(
+        default=50,
+        ge=1,
+        le=500,
+        description="Maximum number of records to return."
+    )
+
+
+
+class CalculateOEEInput(BaseModel):
+    """Input schema for calculate_oee tool."""
+
+    line: Optional[str] = Field(
+        None,
+        description="Equipment/line name (tSystem.Name). Example: 'E1'. If omitted, aggregates across all lines."
+    )
+
+    start_date: str = Field(
+        ...,
+        description="Explicit start date in ISO format (YYYY-MM-DD). Required."
+    )
+
+    end_date: str = Field(
+        ...,
+        description="Explicit end date in ISO format (YYYY-MM-DD). Required."
+    )
+
+    granularity: Optional[str] = Field(
+        default="daily",
+        description="How to group results: 'daily', 'weekly', 'shift'."
+    )
+
+    breakdown: bool = Field(
+        default=True,
+        description="If true, includes Availability, Performance, Quality components separately."
+    )
+
 
 class AnalyzeTaskComplianceInput(BaseModel):
     system_name: Optional[str] = Field(None, description="Filter by production line name (tSystem.Name). Leave empty for all lines.")

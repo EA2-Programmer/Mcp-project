@@ -15,6 +15,10 @@ from src.traksys_mcp.tools.batches import BatchTools
 from src.traksys_mcp.tools.performance import PerformanceTools
 from src.traksys_mcp.tools.meta import MetaTools
 from src.traksys_mcp.tools.tasks import TaskTools
+# NEW: Import the Analysis/OEE tools class
+from src.traksys_mcp.tools.Analysis import AnalysisTools
+# NEW: Import the Materials tools class (now registers BOTH tools)
+from src.traksys_mcp.tools.materials import MaterialsTools
 
 
 class TrakSYSMCPServer:
@@ -30,6 +34,10 @@ class TrakSYSMCPServer:
         self.performance_tools: Optional[PerformanceTools] = None
         self.meta_tools: Optional[MetaTools] = None
         self.task_tools: Optional[TaskTools] = None
+        # NEW: Placeholder for OEE tools
+        self.oee_tools: Optional[AnalysisTools] = None
+        # NEW: Placeholder for Materials tools (contains get_materials + get_products_using_materials)
+        self.materials_tools: Optional[MaterialsTools] = None
 
     def _setup_logging(self) -> None:
         setup_logging()
@@ -80,13 +88,34 @@ class TrakSYSMCPServer:
 
         self.task_tools = TaskTools(mcp=self.mcp, time_service=self.time_service, tracing=self.tracing)
         self.task_tools.register()
+        # NEW: Register OEE/Analysis tools
+        self.oee_tools = AnalysisTools(
+            mcp=self.mcp,
+            time_service=self.time_service)
+        self.oee_tools.register()
 
-        self.logger.info("✓ Tools registered")
+        # NEW: Register materials tools
+        # This single class now registers BOTH tools:
+        #   - get_materials
+        #   - get_products_using_materials
+        self.materials_tools = MaterialsTools(
+            mcp=self.mcp,
+            time_service=self.time_service
+        )
+        self.materials_tools.register()
+
+        self.logger.info("✓ Tools registered (including both materials tools)")
 
     async def run(self) -> None:
+        """
+        Run the MCP server.
+        """
         self._setup_logging()
         try:
+            # Initialize services
             await self.initialize()
+
+            # Register tools
             self.register_tools()
 
             self.logger.info("=" * 60)

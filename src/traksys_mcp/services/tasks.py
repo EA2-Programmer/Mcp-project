@@ -4,7 +4,7 @@ from typing import Any
 from src.traksys_mcp.core.database import execute_query
 from src.traksys_mcp.core.utils import rows_to_dicts
 from src.traksys_mcp.services.time_resolution import TimeResolutionService
-from src.traksys_mcp.utils.taks_queries import (
+from src.traksys_mcp.utils.tasks_queries import (
     build_batch_tasks_query,
     build_compliance_by_task_query,
     build_compliance_totals_query,
