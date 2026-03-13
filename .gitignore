@@ -14,9 +14,7 @@ env/
 docs/MYREF2.md
 docs/MYREF.md
 
-langfuse/
-.langfuse/
-.langfuse
+
 
 .env.docker
 .env
@@ -33,6 +31,7 @@ langfuse/
 # Logs
 *.log
 
+test_sql.py
 # OS
 .DS_Store
 Thumbs.db
