@@ -42,7 +42,6 @@ def _validate_sql(sql: str) -> None:
             f"Query length {len(sql)} exceeds MAX_QUERY_LENGTH={settings.MAX_QUERY_LENGTH}"
         )
 
-    # Trailing semicolon is allowed; a semicolon mid-query means multi-statement
     stripped = sql.strip().rstrip(";")
     if ";" in stripped:
         raise SecurityError("Multi-statement queries are not permitted")
@@ -137,7 +136,7 @@ async def execute_query(
                     batch = cursor.fetchmany(_FETCH_BATCH_SIZE)
                     if not batch:
                         break
-                    rows.extend(batch)
+                    rows.extend(tuple(row) for row in batch)
                     if len(rows) >= _max_rows:
                         rows = rows[:_max_rows]
                         logger.warning("Row limit hit — capped at %d | hash=%s", _max_rows, sql_hash)
@@ -149,10 +148,9 @@ async def execute_query(
             finally:
                 try:
                     cursor.close()
-                except Exception:
+                except (pyodbc.Error, AttributeError):
                     pass
 
-    # Lazy import avoids circular dependency: database → tracing → settings
     _tracing = _get_tracing_service()
 
     try:

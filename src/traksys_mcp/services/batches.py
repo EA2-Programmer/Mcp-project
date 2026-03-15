@@ -66,7 +66,7 @@ async def get_batches(
         trace_span=None,
 ) -> dict:
     """
-    Query batches with intelligent time handling.
+    Query batches with time handling also.
     Joins: tBatch → tJob → tJobBatch → tProduct → tSystem → tShiftHistory
     """
     if batch_name and batch_id is None:
@@ -130,7 +130,7 @@ async def get_batches(
         "batches": batch_list,
         "count": len(batch_list),
         "methodology": {
-            "approach": "Batch query with time-intelligence and smart fallback",
+            "approach": "Batch query with time-awareness and  fallback",
             "signals_checked": [
                 f"Queried tBatch joined with tJob, tProduct, tSystem, tShiftHistory ({len(batch_list)} batches returned)",
                 "Time window resolved via TimeResolutionService — natural language converted to exact dates",

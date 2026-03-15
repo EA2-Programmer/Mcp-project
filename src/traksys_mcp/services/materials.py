@@ -1,7 +1,6 @@
 """
-Material data queries with intelligent time handling + explainability.
+Material data queries with time handling + explainability.
 
-Now returns tables_used + logic so the LLM can always tell the user exactly where the data came from.
 """
 
 import logging
@@ -14,9 +13,7 @@ from src.traksys_mcp.services.time_resolution import TimeResolutionService
 logger = logging.getLogger(__name__)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# 1. get_materials (master data - already working)
-# ─────────────────────────────────────────────────────────────────────────────
+# 1. get_materials
 async def get_materials(
         material_id: int | None = None,
         material_name: str | None = None,
@@ -107,9 +104,6 @@ async def get_materials(
     }
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# 2. get_products_using_materials (NEW - real usage)
-# ─────────────────────────────────────────────────────────────────────────────
 async def get_products_using_materials(
         material_id: int | None = None,
         material_name: str | None = None,

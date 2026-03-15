@@ -6,7 +6,7 @@ logger = logging.getLogger(__name__)
 
 
 def serialize_value(value: Any) -> Any:
-    """Convert a single SQL Server value to a JSON-safe Python type."""
+    "Take one piece of data from the database and turn it into a format that JSON can handle."
     if value is None:
         return None
 

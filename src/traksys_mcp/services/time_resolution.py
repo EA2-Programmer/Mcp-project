@@ -1,5 +1,5 @@
 """
-Time resolution service with intelligent fallback.
+Time resolution service with fallback.
 
 Converts natural language time expressions to datetime windows,
 checking against available data and clamping when necessary.

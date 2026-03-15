@@ -25,7 +25,6 @@ class ToolResponse(BaseModel):
     """Universal response wrapper for all MCP tools."""
 
     model_config = {"frozen": True}
-
     status: ResponseStatus = Field(default=ResponseStatus.SUCCESS)
     count: int = Field(default=0, ge=0)
     data: Any | None = Field(default=None)
