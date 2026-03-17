@@ -9,6 +9,8 @@ import pyodbc
 
 from src.traksys_mcp.config.setting import settings
 from .exceptions import DatabaseConnectionError, DatabaseError, QueryTimeoutError, SecurityError, ValidationError
+import struct
+from datetime import datetime, timezone, timedelta
 
 logger = logging.getLogger(__name__)
 
@@ -77,44 +79,28 @@ def _get_connection():
             timeout=settings.MSSQL_CONNECTION_TIMEOUT,
         )
 
-        # Fix the datetimeoffset converter (-155)
+        # ---------------------------------------------------------
+        # CLEAN FIX: Let the MS ODBC Driver handle text natively.
+        # Only safely catch datetimeoffset (-155) strings.
+        # ---------------------------------------------------------
         def handle_datetimeoffset(dto_value):
-            """Convert SQL Server datetimeoffset bytes to Python datetime."""
-            if dto_value is None:
+            if not dto_value:
                 return None
 
-            # SQL Server datetimeoffset is returned as bytes in a specific format
-            # The format is: YYYY-MM-DD HH:MM:SS.nnnnnnn +|-HH:MM
-            try:
-                # Try to decode as UTF-16-LE first
-                if isinstance(dto_value, bytes):
-                    decoded = dto_value.decode('utf-16-le').strip('\x00')
+            # If the driver returns the clean SQL string (e.g. '2024-11-11 11:46:35.000 +01:00')
+            if isinstance(dto_value, str):
+                return dto_value
 
-                    # Check if it looks like a datetime string
-                    if decoded and any(c.isdigit() for c in decoded):
-                        # Parse the datetime string
-                        from datetime import datetime
-                        # Handle different possible formats
-                        if 'T' in decoded:
-                            # ISO format
-                            return datetime.fromisoformat(decoded.replace('Z', '+00:00'))
-                        elif ' ' in decoded and ('+' in decoded or '-' in decoded[19:]):
-                            # SQL Server format: YYYY-MM-DD HH:MM:SS.nnnnnnn +HH:MM
-                            return datetime.fromisoformat(decoded.replace(' ', 'T'))
-                        else:
-                            # Just return the decoded string if we can't parse
-                            return decoded
-            except (UnicodeDecodeError, ValueError, TypeError) as e:
-                logger.debug(f"Failed to decode datetimeoffset: {e}")
+            # Safe catch for raw bytes without using str() which causes "b'...'"
+            if isinstance(dto_value, bytes):
+                try:
+                    return dto_value.decode('utf-8', errors='ignore').strip('\x00')
+                except Exception:
+                    pass
 
-            # Fallback: return as string if possible
             return str(dto_value)
 
-        # Register the converter for datetimeoffset (-155)
         conn.add_output_converter(-155, handle_datetimeoffset)
-
-        # Also add converter for datetime (-9) just in case
-        conn.add_output_converter(-9, handle_datetimeoffset)
 
         yield conn
     except pyodbc.Error as e:
@@ -126,7 +112,6 @@ def _get_connection():
                 conn.close()
             except Exception:
                 pass
-
 
 async def execute_query(
     sql: str,
@@ -221,9 +206,10 @@ def _get_tracing_service():
     Returns a no-op stub if not yet initialised (e.g. during startup health checks).
     """
     try:
-        from src.traksys_mcp.services.tracing import _tracing_service_instance
-        if _tracing_service_instance is not None:
-            return _tracing_service_instance
+        from src.traksys_mcp.services.langfuse_tracing import get_tracing_service
+        instance = get_tracing_service()
+        if instance is not None:
+            return instance
     except ImportError:
         pass
 

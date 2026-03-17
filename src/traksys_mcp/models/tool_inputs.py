@@ -103,14 +103,10 @@ class GetBatchQualityAnalysisInput(BaseModel):
 
 class GetEquipmentStateInput(BaseModel):
     system_id: Optional[int] = Field(None, description="Specific equipment/system ID (tSystem.ID).")
-    system_name: Optional[str] = Field(None, description="Equipment name or code (tSystem.Name ).")
-    area_id: Optional[int] = Field(None, description="Filter equipment by Area ID.")
-    time_window: Optional[str] = Field(None, description="Natural language time expression for performance analysis.")
-    start_date: Optional[str] = Field(None, description="Explicit start date (YYYY-MM-DD).")
-    end_date: Optional[str] = Field(None, description="Explicit end date (YYYY-MM-DD).")
-    include_oee: bool = Field(False, description="If true, calculates availability and runtime metrics for the period.")
-    include_tags: bool = Field(False, description="If true, fetches real-time tag values from tTag.")
-    limit: int = Field(default=50, ge=1, le=500, description="Maximum number of records to return.")
+    system_name: Optional[str] = Field(None, description="Equipment name or code (tSystem.Name).")
+    area_id: Optional[int] = Field(None, description="Filter equipment by Area ID to see all machines in a zone.")
+    include_active_faults: bool = Field(False, description="If true, checks tEvent for any active, unclosed downtime events currently stopping the machine.")
+    limit: int = Field(default=50, ge=1, le=500, description="Maximum number of machines to return.")
 
 
 class GetBatchTasksInput(BaseModel):
