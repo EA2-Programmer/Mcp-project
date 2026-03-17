@@ -1,8 +1,3 @@
-"""
-Material data queries with time handling + explainability.
-
-"""
-
 import logging
 from typing import Any
 
@@ -13,28 +8,25 @@ from src.traksys_mcp.services.time_resolution import TimeResolutionService
 logger = logging.getLogger(__name__)
 
 
-# 1. get_materials
 async def get_materials(
-        material_id: int | None = None,
-        material_name: str | None = None,
-        material_code: str | None = None,
-        material_type_id: int | None = None,
-        material_group_id: int | None = None,
-        time_window: str | None = None,
-        start_date: str | None = None,
-        end_date: str | None = None,
-        limit: int = 50,
-        time_service: TimeResolutionService | None = None,
+    material_id: int | None = None,
+    material_name: str | None = None,
+    material_code: str | None = None,
+    material_type_id: int | None = None,
+    material_group_id: int | None = None,
+    time_window: str | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    limit: int = 50,
+    time_service: TimeResolutionService | None = None,
 ) -> dict:
     """Query materials (master data)."""
-
-    # Resolve name/code → ID
     if (material_name or material_code) and material_id is None:
         sql_lookup = """
-                     SELECT TOP 1 ID FROM tMaterial
-                     WHERE Name = ? OR AltName = ? OR MaterialCode = ?
-                     ORDER BY ID DESC
-                     """
+                 SELECT TOP 1 ID FROM tMaterial
+                 WHERE Name = ? OR AltName = ? OR MaterialCode = ?
+                 ORDER BY ID DESC
+                  """
         params = (material_name or material_code, material_name or material_code, material_code or material_name)
         _, rows = await execute_query(sql_lookup, params)
         if rows and rows[0][0]:
@@ -49,7 +41,9 @@ async def get_materials(
     actual_end = end_date
 
     apply_time_filter = bool(time_window or start_date or end_date)
-    if apply_time_filter and time_service:
+
+    # FIX: Only resolve time_window if it's truthy
+    if apply_time_filter and time_service and time_window:
         resolution = await time_service.resolve(time_window, table="tMaterial")
         time_info = resolution
         actual_start = resolution["actual"]["start"]
@@ -68,27 +62,31 @@ async def get_materials(
         where_parts.append("m.MaterialGroupID = ?")
         params.append(material_group_id)
     if apply_time_filter:
-        if actual_start: where_parts.append("m.ModifiedDateTime >= ?"); params.append(actual_start)
-        if actual_end:   where_parts.append("m.ModifiedDateTime <= ?"); params.append(actual_end)
+        if actual_start:
+            where_parts.append("m.ModifiedDateTime >= ?")
+            params.append(actual_start)
+        if actual_end:
+            where_parts.append("m.ModifiedDateTime <= ?")
+            params.append(actual_end)
 
     where_clause = " AND ".join(where_parts) if where_parts else "1=1"
     order_by = "m.ModifiedDateTime DESC" if apply_time_filter else "m.ID ASC"
 
     sql = f"""
-        SELECT TOP {safe_limit}
-            m.ID                            AS material_id,
-            m.Name                          AS name,
-            m.MaterialCode                  AS material_code,
-            m.MaterialGroupID               AS material_group_id,
-            g.Name                          AS material_group_name,
-            m.Units                         AS units,
-            m.PlannedSize                   AS planned_size,
-            m.ModifiedDateTime              AS modified_datetime,
-            m.VersionState                  AS version_state
-        FROM tMaterial m
-        LEFT JOIN tMaterialGroup g ON m.MaterialGroupID = g.ID
-        WHERE {where_clause}
-        ORDER BY {order_by}
+    SELECT TOP {safe_limit}
+        m.ID                            AS material_id,
+        m.Name                          AS name,
+        m.MaterialCode                  AS material_code,
+        m.MaterialGroupID               AS material_group_id,
+        g.Name                          AS material_group_name,
+        m.Units                         AS units,
+        m.PlannedSize                   AS planned_size,
+        m.ModifiedDateTime              AS modified_datetime,
+        m.VersionState                  AS version_state
+    FROM tMaterial m
+    LEFT JOIN tMaterialGroup g ON m.MaterialGroupID = g.ID
+    WHERE {where_clause}
+    ORDER BY {order_by}
     """
 
     columns, rows = await execute_query(sql, tuple(params))
@@ -100,9 +98,8 @@ async def get_materials(
         "tables_used": ["tMaterial", "tMaterialGroup"],
         "logic": "Direct SELECT from the master material table (tMaterial) with optional LEFT JOIN to group name. "
                  "No time filter unless user explicitly asks for modified date range.",
-        "time_info": time_info
+        "time_info": time_info,
     }
-
 
 async def get_products_using_materials(
         material_id: int | None = None,
@@ -123,8 +120,8 @@ async def get_products_using_materials(
                      WHERE Name = ? OR AltName = ? OR MaterialCode = ?
                      ORDER BY ID DESC
                      """
-        params = (material_name or material_code, material_name or material_code, material_code or material_name)
-        _, rows = await execute_query(sql_lookup, params)
+        params = (material_name or material_code, material_name or material_code, material_code or material_name) # type: ignore
+        _, rows = await execute_query(sql_lookup, params)  # type: ignore
         if rows and rows[0][0]:
             material_id = rows[0][0]
         else:

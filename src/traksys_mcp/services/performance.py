@@ -14,20 +14,19 @@ logger = logging.getLogger(__name__)
 
 
 async def get_equipment_state(
-        system_id: Optional[int] = None,
-        system_name: Optional[str] = None,
-        area_id: Optional[int] = None,
-        time_window: Optional[str] = None,
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None,
-        include_oee: bool = False,
-        include_tags: bool = False,
-        limit: int = 50,
-        time_service: Optional[TimeResolutionService] = None,
-        trace_span=None,
+    system_id: Optional[int] = None,
+    system_name: Optional[str] = None,
+    area_id: Optional[int] = None,
+    time_window: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    include_oee: bool = False,
+    include_tags: bool = False,
+    limit: int = 50,
+    time_service: Optional[TimeResolutionService] = None,
+    trace_span=None,
 ) -> dict:
     """Retrieve equipment status, OEE metrics, and optional real-time tag data."""
-
     if system_name and system_id is None:
         _, rows = await execute_query(
             SYSTEM_NAME_LOOKUP,
@@ -45,13 +44,16 @@ async def get_equipment_state(
     actual_start = start_date
     actual_end = end_date
 
-    if (time_window or start_date) and time_service:
-        resolution = await time_service.resolve(time_window or "", table="tJobSystemActual")
+    if time_window and time_service and not (start_date and end_date):
+        resolution = await time_service.resolve(time_window, table="tJobSystemActual")
         time_info = resolution
         actual_start = resolution["actual"]["start"]
         actual_end = resolution["actual"]["end"]
+    elif start_date and end_date:
+        logger.info("Using explicit date range: %s to %s", start_date, end_date)
+        pass
 
-    where_parts = ["s.Enabled = 1"]
+    where_parts = ["s.Enabled = 1", "s.IsTemplate = 0"]
     params = []
 
     if system_id:

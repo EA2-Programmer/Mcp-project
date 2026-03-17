@@ -17,21 +17,25 @@ if TYPE_CHECKING:
 
 class PerformanceTools:
     """
-    Performance tool collection.
+    Tools for checking equipment status and production performance.
 
-    Encapsulates all equipment and OEE related tools with tracing injected
-    alongside TimeResolutionService.
+    Lets you ask questions about:
+    - Is a machine running right now?
+    - How many sessions did equipment run last week?
+    - What's the current production count?
+
+    For true OEE (Availability × Performance × Quality), use AnalysisTools.calculate_oee.
     """
 
     def __init__(
         self,
         mcp: "FastMCP",
         time_service: "TimeResolutionService",
-        tracing: "TracingService",                                 # ← NEW
+        tracing: "TracingService",
     ):
         self.mcp = mcp
         self.time_service = time_service
-        self.tracing = tracing                                     # ← NEW
+        self.tracing = tracing
         self.logger = logging.getLogger(__name__)
 
     def register(self) -> None:
@@ -42,25 +46,24 @@ class PerformanceTools:
 
         @self.mcp.tool(
             name="get_equipment_state",
-            description="""Get real-time status, downtime, and performance metrics for manufacturing equipment.
+            description="""Get real-time status and runtime metrics for manufacturing equipment.
 
 **Use this tool when the user asks about:**
-- "What is the status of Packer 01?"
+- "What is the current status of Line E1?"
 - "Which machines are currently idle?"
-- "Show me OEE for the filling line yesterday."
-- "What are the live tag values for the Boiler?"
-- "How much downtime did Area 5 have last week?"
+- "Show me live tag values for E1."
+- "How many shifts did E2 run last week?"
 
-**Intelligent Features:**
-- **Live Status**: Shows if a machine is 'Running' or 'Idle' based on open production sessions.
-- **Real-time Tags**: Can fetch live counts, product codes, and speeds directly from tTag.
-- **OEE & Availability**: Calculates runtime and session counts over any natural language time period.
-- **Smart Fallback**: If requested dates have no data, automatically finds the most recent available data.
+**DO NOT use this tool for OEE questions.**
+For OEE (Overall Equipment Effectiveness), Availability %, Performance %, or Quality %,
+use `calculate_oee` instead — it reads from tOeeCalculation and tOeeInterval for
+mathematically correct results.
 
 **Key Parameters:**
-- `system_name`: Human name of the machine (e.g., 'Packer 01').
-- `include_tags`: Set to true for live speeds/counts.
-- `include_oee`: Set to true for downtime/availability analysis.
+- `system_name`: Equipment name (e.g., 'E1', 'Packer 01').
+- `include_tags`: Set to true for live counts, speeds, and product codes from tTag.
+- `include_oee`: Set to true for runtime minutes and session counts (this is NOT true OEE).
+- `start_date` / `end_date`: Use YYYY-MM-DD format for date filtering (preferred over time_window).
 """
         )
         async def get_equipment_state(params: GetEquipmentStateInput) -> dict:
@@ -69,7 +72,7 @@ class PerformanceTools:
                 try:
                     result = await performance.get_equipment_state(
                         time_service=self.time_service,
-                        trace_span=span,                           # ← NEW
+                        trace_span=span,
                         **inputs,
                     )
 
@@ -97,18 +100,18 @@ class PerformanceTools:
                             time_info=time_info,
                         )
 
-                    self.tracing.set_output(span, response.to_dict())   # ← NEW
+                    self.tracing.set_output(span, response.to_dict())
                     return response.to_dict()
 
                 except Exception as e:
-                    self.tracing.record_error(span, e, "get_equipment_state")  # ← NEW
+                    self.tracing.record_error(span, e, "get_equipment_state")
                     self.logger.error("get_equipment_state failed: %s", e, exc_info=True)
                     return ToolResponse.error(
                         message=str(e),
                         suggestions=[
                             "Verify the system_name or system_id is correct",
                             "Check if the equipment is Enabled in tSystem",
-                            "Try 'last 7 days' to see historical performance",
+                            "Try start_date and end_date in YYYY-MM-DD format",
                             "Ensure tTag and tJobSystemActual tables are accessible",
                         ]
                     ).to_dict()

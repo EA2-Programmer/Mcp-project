@@ -3,10 +3,13 @@ Time resolution service with fallback.
 
 Converts natural language time expressions to datetime windows,
 checking against available data and clamping when necessary.
+
+Dependencies:
+    pip install dateparser python-dateutil
 """
 
+from calendar import monthrange
 from datetime import datetime, date, time, timezone, timedelta
-import re
 import logging
 from typing import TYPE_CHECKING
 
@@ -17,9 +20,18 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Explicit time boundaries for day windows
 DAY_START = time(0, 0, 0)
-DAY_END = time(23, 59, 59, 999999)
+DAY_END   = time(23, 59, 59, 999999)
+
+# dateparser settings — always interpret relative to now, always UTC
+_DATEPARSER_SETTINGS = {
+    "RETURN_TIME_AS_PERIOD": False,
+    "PREFER_DAY_OF_MONTH": "first",
+    "PREFER_DATES_FROM": "past",
+    "TIMEZONE": "UTC",
+    "RETURN_AS_TIMEZONE_AWARE": True,
+    "TO_TIMEZONE": "UTC",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -60,9 +72,12 @@ class TimeResolutionService:
     """
     Converts natural language time expressions to datetime windows.
 
-    Checks the requested window against available data in the database
-    and clamps to the actual range when needed, returning a fallback
-    message the LLM can surface to the user.
+    Uses `dateparser` for broad natural language support, with a thin
+    layer on top to handle period expressions ("September 2025",
+    "last month") that need a start AND end, not just a single point.
+
+    Checks the resolved window against available data in the database
+    and clamps to the actual range when needed.
     """
 
     def __init__(self, data_cache: "DataAvailabilityCache"):
@@ -74,13 +89,12 @@ class TimeResolutionService:
 
         Returns:
             {
-                "requested": {"start": "...", "end": "..."},
-                "actual":    {"start": "...", "end": "..."},
+                "requested":        {"start": "...", "end": "..."},
+                "actual":           {"start": "...", "end": "..."},
                 "fallback_triggered": bool,
-                "message": str | None
+                "message":          str | None
             }
         """
-        # Step 1: Parse expression to target window
         try:
             target = self._parse_expression(expression)
         except TimeResolutionError as e:
@@ -91,51 +105,45 @@ class TimeResolutionService:
                 f"Could not understand '{expression}'. Using last 7 days instead."
             )
 
-        # Step 2: Check if target exists in database
         available = await self.cache.get_range(table)
         if not available:
             return {
                 "requested": target.to_dict(),
-                "actual": target.to_dict(),
+                "actual":    target.to_dict(),
                 "fallback_triggered": False,
                 "message": None,
             }
 
         min_date, max_date = available
         target_start_date = target.start.date()
-        target_end_date = target.end.date()
+        target_end_date   = target.end.date()
 
-        # Step 3: Check if target window fits inside available range
         if (min_date <= target_start_date <= max_date and
-                min_date <= target_end_date <= max_date):
+                min_date <= target_end_date   <= max_date):
             return {
                 "requested": target.to_dict(),
-                "actual": target.to_dict(),
+                "actual":    target.to_dict(),
                 "fallback_triggered": False,
                 "message": None,
             }
 
-        # Step 4: Clamp to available range
         actual_start = self._clamp_date(target_start_date, min_date, max_date)
-        actual_end = self._clamp_date(target_end_date, min_date, max_date)
+        actual_end   = self._clamp_date(target_end_date,   min_date, max_date)
 
         actual_window = TimeWindow(
             start=datetime.combine(actual_start, DAY_START, tzinfo=timezone.utc),
-            end=datetime.combine(actual_end, DAY_END, tzinfo=timezone.utc),
+            end=  datetime.combine(actual_end,   DAY_END,   tzinfo=timezone.utc),
         )
 
         return {
             "requested": target.to_dict(),
-            "actual": actual_window.to_dict(),
+            "actual":    actual_window.to_dict(),
             "fallback_triggered": True,
             "message": self._generate_message(
                 expression,
-                target_start_date,
-                target_end_date,
-                actual_start,
-                actual_end,
-                min_date,
-                max_date,
+                target_start_date, target_end_date,
+                actual_start, actual_end,
+                min_date, max_date,
             ),
         }
 
@@ -145,70 +153,104 @@ class TimeResolutionService:
 
     def _parse_expression(self, expr: str) -> TimeWindow:
         """
-        Parse natural language time expressions into TimeWindow objects.
+        Parse any natural language time expression into a TimeWindow.
 
-        Supported patterns:
-            - "yesterday"
-            - "last N days" / "last N day"
-            - "this week"  (Monday to now, week-to-date)
-            - "YYYY-MM-DD" (exact date)
-            - "YYYY-MM-DD to YYYY-MM-DD" (explicit range)
-
-        All times are UTC.
+        Strategy (in order):
+          1. Period expressions ("September 2025", "last month", "this week",
+             "Q3 2025") — need a start AND end date, handled explicitly.
+          2. dateparser.parse() — handles everything else: "yesterday",
+             "2 weeks ago", "2025-09-01", "last 7 days", etc.
         """
-        expr = expr.lower().strip()
+        try:
+            import dateparser
+            from dateparser.search import search_dates
+        except ImportError:
+            raise TimeResolutionError(
+                "dateparser not installed. Run: pip install dateparser"
+            )
+
+        expr_stripped = expr.strip()
+        lower = expr_stripped.lower()
         now = datetime.now(timezone.utc)
 
-        # Yesterday
-        if expr == "yesterday":
-            day = (now - timedelta(days=1)).date()
-            return TimeWindow(
-                start=datetime.combine(day, DAY_START, tzinfo=timezone.utc),
-                end=datetime.combine(day, DAY_END, tzinfo=timezone.utc),
-            )
+        # ── 1. Period expressions that need start + end ────────────────────
 
-        # Last N days
-        match = re.match(r"last (\d+) days?", expr)
-        if match:
-            days = int(match.group(1))
-            start = (now - timedelta(days=days)).replace(
-                hour=0, minute=0, second=0, microsecond=0
-            )
-            return TimeWindow(start=start, end=now)
-
-        # This week — Monday to now (week-to-date, not full future week)
-        if expr == "this week":
+        # "this week" → Monday to Sunday of current week
+        if lower == "this week":
             start = (now - timedelta(days=now.weekday())).replace(
                 hour=0, minute=0, second=0, microsecond=0
             )
-            return TimeWindow(start=start, end=now)
-
-        # Date range: "2024-08-01 to 2024-08-31"
-        range_match = re.match(
-            r"(\d{4}-\d{2}-\d{2})\s+to\s+(\d{4}-\d{2}-\d{2})", expr
-        )
-        if range_match:
-            try:
-                start_date = datetime.strptime(range_match.group(1), "%Y-%m-%d").date()
-                end_date = datetime.strptime(range_match.group(2), "%Y-%m-%d").date()
-            except ValueError:
-                raise TimeResolutionError(
-                    f"Invalid date range: '{range_match.group(1)} to {range_match.group(2)}'"
-                )
-            return TimeWindow(
-                start=datetime.combine(start_date, DAY_START, tzinfo=timezone.utc),
-                end=datetime.combine(end_date, DAY_END, tzinfo=timezone.utc),
+            end = (start + timedelta(days=6)).replace(
+                hour=23, minute=59, second=59, microsecond=999999
             )
+            return TimeWindow(start=start, end=end)
 
-        # Exact date: YYYY-MM-DD
-        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", expr):
-            try:
-                day = datetime.strptime(expr, "%Y-%m-%d").date()
-            except ValueError:
-                raise TimeResolutionError(f"Invalid date: '{expr}'")
+        # "last week" → previous full Mon–Sun
+        if lower == "last week":
+            start_of_this_week = (now - timedelta(days=now.weekday())).replace(
+                hour=0, minute=0, second=0, microsecond=0
+            )
+            start = start_of_this_week - timedelta(days=7)
+            end   = (start_of_this_week - timedelta(seconds=1)).replace(
+                microsecond=999999
+            )
+            return TimeWindow(start=start, end=end)
+
+        # "this month"
+        if lower == "this month":
+            start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            last_day = monthrange(now.year, now.month)[1]
+            end = now.replace(
+                day=last_day, hour=23, minute=59, second=59, microsecond=999999
+            )
+            return TimeWindow(start=start, end=end)
+
+        # "last month"
+        if lower == "last month":
+            first_of_this = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            last_of_prev  = first_of_this - timedelta(seconds=1)
+            first_of_prev = last_of_prev.replace(
+                day=1, hour=0, minute=0, second=0, microsecond=0
+            )
+            return TimeWindow(start=first_of_prev, end=last_of_prev)
+
+        # "Month YYYY" or "Month, YYYY" — e.g. "September 2025", "Sep 2025"
+        # dateparser parses this as a single point (first of month);
+        # we need the full month range.
+        month_year = dateparser.parse(
+            expr_stripped,
+            settings={**_DATEPARSER_SETTINGS, "PREFER_DAY_OF_MONTH": "first"},
+        )
+        if month_year:
+            # Check if dateparser thinks the period is "month"
+            from dateparser.date import DateDataParser
+            ddp = DateDataParser(settings=_DATEPARSER_SETTINGS)
+            data = ddp.get_date_data(expr_stripped)
+            if data and data.get("period") == "month":
+                d = data["date_obj"].astimezone(timezone.utc)
+                last_day = monthrange(d.year, d.month)[1]
+                return TimeWindow(
+                    start=d.replace(day=1, hour=0, minute=0, second=0, microsecond=0),
+                    end=  d.replace(day=last_day, hour=23, minute=59,
+                                    second=59, microsecond=999999),
+                )
+            if data and data.get("period") == "year":
+                d = data["date_obj"].astimezone(timezone.utc)
+                return TimeWindow(
+                    start=d.replace(month=1, day=1, hour=0, minute=0,
+                                    second=0, microsecond=0),
+                    end=  d.replace(month=12, day=31, hour=23, minute=59,
+                                    second=59, microsecond=999999),
+                )
+
+        # ── 2. dateparser handles everything else ──────────────────────────
+        # "yesterday", "last 7 days", "2025-09-01", "2 weeks ago", etc.
+        parsed = dateparser.parse(expr_stripped, settings=_DATEPARSER_SETTINGS)
+        if parsed:
+            day = parsed.astimezone(timezone.utc).date()
             return TimeWindow(
                 start=datetime.combine(day, DAY_START, tzinfo=timezone.utc),
-                end=datetime.combine(day, DAY_END, tzinfo=timezone.utc),
+                end=  datetime.combine(day, DAY_END,   tzinfo=timezone.utc),
             )
 
         raise TimeResolutionError(f"Unknown time expression: '{expr}'")
@@ -227,7 +269,6 @@ class TimeResolutionService:
 
     @staticmethod
     def _clamp_date(target_date: date, min_date: date, max_date: date) -> date:
-        """Clamp a date to the available data range."""
         if target_date < min_date:
             return min_date
         if target_date > max_date:
@@ -235,10 +276,9 @@ class TimeResolutionService:
         return target_date
 
     def _apply_fallback(self, window: TimeWindow, message: str) -> dict:
-        """Build a fallback response dict from a window and message."""
         return {
             "requested": window.to_dict(),
-            "actual": window.to_dict(),
+            "actual":    window.to_dict(),
             "fallback_triggered": True,
             "message": message,
         }
@@ -246,14 +286,10 @@ class TimeResolutionService:
     @staticmethod
     def _generate_message(
         expr: str,
-        target_start: date,
-        target_end: date,
-        actual_start: date,
-        actual_end: date,
-        min_date: date,
-        max_date: date,
+        target_start: date, target_end: date,
+        actual_start: date, actual_end: date,
+        min_date: date, max_date: date,
     ) -> str:
-        """Generate a human-readable fallback explanation for the LLM."""
         if target_start == target_end:
             if target_start > max_date:
                 return (
@@ -266,7 +302,6 @@ class TimeResolutionService:
                 f"The earliest data is from {min_date}. "
                 f"Showing results from that date instead."
             )
-
         return (
             f"No data available for '{expr}' ({target_start} to {target_end}). "
             f"Available data spans {min_date} to {max_date}. "

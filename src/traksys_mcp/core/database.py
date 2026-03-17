@@ -76,7 +76,46 @@ def _get_connection():
             autocommit=False,
             timeout=settings.MSSQL_CONNECTION_TIMEOUT,
         )
-        conn.add_output_converter(-155, lambda raw: raw.decode("utf-16-le"))
+
+        # Fix the datetimeoffset converter (-155)
+        def handle_datetimeoffset(dto_value):
+            """Convert SQL Server datetimeoffset bytes to Python datetime."""
+            if dto_value is None:
+                return None
+
+            # SQL Server datetimeoffset is returned as bytes in a specific format
+            # The format is: YYYY-MM-DD HH:MM:SS.nnnnnnn +|-HH:MM
+            try:
+                # Try to decode as UTF-16-LE first
+                if isinstance(dto_value, bytes):
+                    decoded = dto_value.decode('utf-16-le').strip('\x00')
+
+                    # Check if it looks like a datetime string
+                    if decoded and any(c.isdigit() for c in decoded):
+                        # Parse the datetime string
+                        from datetime import datetime
+                        # Handle different possible formats
+                        if 'T' in decoded:
+                            # ISO format
+                            return datetime.fromisoformat(decoded.replace('Z', '+00:00'))
+                        elif ' ' in decoded and ('+' in decoded or '-' in decoded[19:]):
+                            # SQL Server format: YYYY-MM-DD HH:MM:SS.nnnnnnn +HH:MM
+                            return datetime.fromisoformat(decoded.replace(' ', 'T'))
+                        else:
+                            # Just return the decoded string if we can't parse
+                            return decoded
+            except (UnicodeDecodeError, ValueError, TypeError) as e:
+                logger.debug(f"Failed to decode datetimeoffset: {e}")
+
+            # Fallback: return as string if possible
+            return str(dto_value)
+
+        # Register the converter for datetimeoffset (-155)
+        conn.add_output_converter(-155, handle_datetimeoffset)
+
+        # Also add converter for datetime (-9) just in case
+        conn.add_output_converter(-9, handle_datetimeoffset)
+
         yield conn
     except pyodbc.Error as e:
         logger.error("Connection failed: %s", e)

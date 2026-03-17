@@ -1,0 +1,38 @@
+# yaml-language-server: $schema=https://promptfoo.dev/config-schema.yaml
+description: "TrakSYS MCP Server - Working Test"
+
+prompts:
+  - "{{query}}"
+
+providers:
+  - id: http
+    config:
+      url: "http://localhost:8000/{{expected_tool}}"
+      method: "POST"
+      headers:
+        Authorization: "Bearer cQDOOOKH1QRqYqRt"
+        Content-Type: "application/json"
+      # ✅ body must exist (promptfoo invariant), transformRequest overrides it at runtime
+      body:
+        params: {}
+      # ✅ transformRequest serializes expected_params properly as a real JSON object
+      transformRequest: |
+        let params = {};
+        if (vars.expected_params && vars.expected_params !== '{}') {
+          try { params = JSON.parse(vars.expected_params); } catch(e) {}
+        }
+        return JSON.stringify({ params });
+
+tests: "inputs.csv"
+
+defaultTest:
+  assert:
+    - type: not-contains
+      value: "error"
+    - type: not-contains
+      value: "Not Found"
+    - type: latency
+      threshold: 30000
+    - type: is-json
+    - type: python
+      value: file://verifier.py

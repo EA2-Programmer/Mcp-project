@@ -17,21 +17,18 @@ _SKIP_TIME = {"all", "any", "everything", "all time", "alltime"}
 
 
 async def get_batch_tasks(
-        batch_id: int | None = None,
-        batch_name: str | None = None,
-        status_filter: str | None = None,
-        task_name: str | None = None,
-        time_window: str | None = None,
-        start_date: str | None = None,
-        end_date: str | None = None,
-        limit: int = 100,
-        time_service: TimeResolutionService | None = None,
-        trace_span=None,
+    batch_id: int | None = None,
+    batch_name: str | None = None,
+    status_filter: str | None = None,
+    task_name: str | None = None,
+    time_window: str | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    limit: int = 100,
+    time_service: TimeResolutionService | None = None,
+    trace_span=None,
 ) -> dict:
-    """
-    Retrieve compliance tasks for one or more batches.
-    Supports filtering by batch, task status, task name, and time window.
-    """
+    """Retrieve compliance tasks for one or more batches."""
     safe_limit = max(1, min(int(limit), 1000))
 
     if batch_name and batch_id is None:
@@ -51,6 +48,7 @@ async def get_batch_tasks(
     actual_start = start_date
     actual_end = end_date
 
+    # FIX: Only call time_service.resolve() if time_window is truthy
     if time_window and time_service and batch_id is None and time_window.lower().strip() not in _SKIP_TIME:
         resolution = await time_service.resolve(time_window, table="tBatch")
         time_info = resolution
@@ -129,7 +127,6 @@ async def get_batch_tasks(
         result["time_info"] = time_info
 
     return result
-
 
 async def analyze_task_compliance(
         system_name: str | None = None,

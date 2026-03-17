@@ -1,121 +1,130 @@
+"""
+Langfuse tracing service for TrakSYS MCP tools.
+
+Wraps Langfuse v3 trace/span lifecycle with clean async context managers.
+When tracing is disabled or Langfuse is unavailable, all operations are
+silent no-ops — callers never need to branch on tracing state.
+"""
+
 import logging
+import time
 from contextlib import asynccontextmanager, contextmanager
-from typing import Any, Optional, AsyncGenerator
+from typing import Any, Generator, AsyncGenerator, Optional
 
 from src.traksys_mcp.config.setting import settings
 
 logger = logging.getLogger(__name__)
 
 
+# ---------------------------------------------------------------------------
+# Null object — used when tracing is disabled
+# ---------------------------------------------------------------------------
+
 class _NoOpSpan:
-    """Placeholder span used when tracing is disabled — all calls are silent no-ops."""
-    def update(self, **kwargs) -> None: pass
-    def end(self) -> None: pass
-    def generation(self, **kwargs) -> None: pass
-    def span(self, **kwargs) -> None: pass
-    def event(self, **kwargs) -> None: pass
+    """Silent no-op span. All operations succeed without side effects."""
+
+    def update(self, **kwargs) -> None:
+        pass
+
+    def end(self) -> None:
+        pass
+
+    def span(self, **kwargs) -> "_NoOpSpan":
+        return self
+
+    def generation(self, **kwargs) -> "_NoOpSpan":
+        return self
+
+    def event(self, **kwargs) -> "_NoOpSpan":
+        return self
 
 
 _NOOP = _NoOpSpan()
 
 
 class SpanWrapper:
-    """Wraps a Langfuse span to provide safe, exception-tolerant child span creation."""
+    """
+    Wraps a Langfuse span and its parent trace.
 
-    def __init__(self, span, trace):
+    Responsibilities:
+    - Forwards update/generation/span/event calls to the underlying span
+    - Tracks child spans so they are ended before the parent
+    - Ends the trace when end() is called
+    """
+
+    __slots__ = ("_span", "_trace", "_children")
+
+    def __init__(self, span: Any, trace: Any) -> None:
         self._span = span
         self._trace = trace
-        self._child_spans = []
+        self._children: list[Any] = []
 
-    def update(self, **kwargs):
-        if hasattr(self._span, "update"):
-            try:
-                self._span.update(**kwargs)
-            except Exception as e:
-                logger.debug("Span update error: %s", e)
+    def update(self, **kwargs) -> None:
+        self._span.update(**kwargs)
 
-    def generation(self, name: str, input: Any = None, output: Any = None, **kwargs):
-        if hasattr(self._span, "generation"):
-            try:
-                gen = self._span.generation(name=name, input=input, output=output, **kwargs)
-                self._child_spans.append(gen)
-                return gen
-            except Exception as e:
-                logger.debug("Generation error: %s", e)
-        return None
+    def span(self, name: str, input: Any = None, **kwargs) -> Any:
+        child = self._span.span(name=name, input=input, **kwargs)
+        self._children.append(child)
+        return child
 
-    def span(self, name: str, input: Any = None, **kwargs):
-        if hasattr(self._span, "span"):
-            try:
-                child = self._span.span(name=name, input=input, **kwargs)
-                self._child_spans.append(child)
-                return child
-            except Exception as e:
-                logger.debug("Child span error: %s", e)
-        return None
+    def generation(self, name: str, input: Any = None, output: Any = None, **kwargs) -> Any:
+        child = self._span.generation(name=name, input=input, output=output, **kwargs)
+        self._children.append(child)
+        return child
 
-    def event(self, name: str, input: Any = None, **kwargs):
-        if hasattr(self._span, "event"):
-            try:
-                evt = self._span.event(name=name, input=input, **kwargs)
-                self._child_spans.append(evt)
-                return evt
-            except Exception as e:
-                logger.debug("Event error: %s", e)
-        return None
+    def event(self, name: str, input: Any = None, **kwargs) -> Any:
+        child = self._span.event(name=name, input=input, **kwargs)
+        self._children.append(child)
+        return child
 
-    def end(self):
-        for child in self._child_spans:
-            if hasattr(child, "end"):
-                try:
-                    child.end()
-                except Exception:
-                    pass
-        if hasattr(self._span, "end"):
-            try:
-                self._span.end()
-            except Exception as e:
-                logger.debug("Span end error: %s", e)
-        if hasattr(self._trace, "end"):
-            try:
-                self._trace.end()
-            except Exception as e:
-                logger.debug("Trace end error: %s", e)
+    def end(self) -> None:
+        for child in self._children:
+            child.end()
+        self._span.end()
+        self._trace.end()
 
 
 class TracingService:
-    """Langfuse v3.14.5 tracing service for MCP tools."""
+    """
+    Langfuse tracing service for MCP tools.
+
+    Usage:
+        async with tracing.trace_tool("get_batches", inputs) as span:
+            result = await do_work()
+            tracing.set_output(span, result)
+    """
 
     def __init__(self) -> None:
+        self._client: Any = None
         self._enabled = False
-        self._client = None
+        self._init()
 
+    def _init(self) -> None:
         if not settings.ENABLE_TRACING:
             logger.info("Tracing disabled (ENABLE_TRACING=False)")
             return
 
-        secret = settings.LANGFUSE_SECRET_KEY
-        public = settings.LANGFUSE_PUBLIC_KEY
-
-        if not secret or not public:
-            logger.warning("Tracing disabled: missing credentials")
+        if not settings.LANGFUSE_SECRET_KEY or not settings.LANGFUSE_PUBLIC_KEY:
+            logger.warning("Tracing disabled: LANGFUSE_SECRET_KEY or LANGFUSE_PUBLIC_KEY not set")
             return
 
         try:
             from langfuse import Langfuse
+
             self._client = Langfuse(
-                secret_key=secret.get_secret_value(),
-                public_key=public,
+                secret_key=settings.LANGFUSE_SECRET_KEY.get_secret_value(),
+                public_key=settings.LANGFUSE_PUBLIC_KEY,
                 host=settings.LANGFUSE_BASE_URL,
                 debug=settings.LOG_LEVEL == "DEBUG",
-                flush_at=1,
-                flush_interval=1,
+                flush_at=20,
+                flush_interval=10,
             )
             self._client.auth_check()
             self._enabled = True
-            logger.info("Langfuse v3 enabled: %s", settings.LANGFUSE_BASE_URL)
+            logger.info("Langfuse tracing enabled → %s", settings.LANGFUSE_BASE_URL)
+
         except ImportError:
-            logger.warning("langfuse not installed")
+            logger.warning("Tracing disabled: langfuse package not installed")
         except Exception as e:
             logger.error("Langfuse init failed: %s", e)
 
@@ -123,20 +132,24 @@ class TracingService:
     def enabled(self) -> bool:
         return self._enabled
 
+
     @asynccontextmanager
-    async def trace_tool(self, tool_name: str, inputs: dict) -> AsyncGenerator[Any, None]:
-        """Create a root trace + span for a tool execution."""
+    async def trace_tool(
+        self, tool_name: str, inputs: dict
+    ) -> AsyncGenerator[Any, None]:
+        """
+        Root trace + span for a single tool execution.
+
+        Yields a SpanWrapper on success, or _NOOP if tracing is off.
+        """
         if not self._enabled:
             yield _NOOP
             return
 
-        trace = None
+        wrapper: Any = _NOOP
         try:
-            from langfuse import get_client
-            langfuse = get_client()
-
-            trace = langfuse.trace(
-                name=f"tools/call {tool_name}",
+            trace = self._client.trace(
+                name=f"tools/call_{tool_name}",
                 input=inputs,
                 metadata={
                     "server": "TrakSYS MCP",
@@ -144,130 +157,117 @@ class TracingService:
                     "transport": settings.SERVER_TRANSPORT,
                     "read_only": settings.READ_ONLY,
                 },
-                tags=["mcp", "traksys", "manufacturing", f"transport:{settings.SERVER_TRANSPORT}"],
+                tags=["mcp", "traksys", f"tool:{tool_name}",
+                      f"transport:{settings.SERVER_TRANSPORT}"],
             )
             span = trace.span(name=tool_name, input=inputs)
             wrapper = SpanWrapper(span, trace)
-            logger.info("Created trace for %s", tool_name)
             yield wrapper
-            langfuse.flush()
 
         except Exception as e:
-            logger.error("Trace error in %s: %s", tool_name, e, exc_info=True)
-            if trace:
-                try:
-                    trace.end()
-                except Exception:
-                    pass
+            logger.error("Trace setup failed for %s: %s", tool_name, e)
             yield _NOOP
+            return
+        try:
+            wrapper.end()
+        except Exception as e:
+            logger.debug("Span end error for %s: %s", tool_name, e)
+
 
     @contextmanager
-    def db_span(self, parent_span: Any, span_name: str, sql_hash: str, params_count: int):
-        """Create a child span for a database query under the given parent span."""
-        if not self._enabled or isinstance(parent_span, _NoOpSpan):
+    def db_span(
+        self,
+        parent: Any,
+        name: str,
+        sql_hash: str,
+        params_count: int,
+    ) -> Generator[Any, None, None]:
+        """
+        Child span for a single database query.
+        """
+        if not self._enabled or isinstance(parent, _NoOpSpan):
             yield _NOOP
             return
 
-        child_span = None
+        child = parent.span(
+            name=name,
+            input={"sql_hash": sql_hash, "params_count": params_count},
+        )
         try:
-            if hasattr(parent_span, "span"):
-                child_span = parent_span.span(
-                    name=span_name,
-                    input={"sql_hash": sql_hash, "params_count": params_count},
-                )
-                yield child_span
-                if child_span and hasattr(child_span, "end"):
-                    child_span.end()
-            else:
-                yield _NOOP
-        except Exception as e:
-            logger.error("DB span error: %s", e)
-            if child_span and hasattr(child_span, "end"):
-                try:
-                    child_span.end()
-                except Exception:
-                    pass
-            yield _NOOP
+            yield child
+        finally:
+            try:
+                child.end()
+            except Exception as e:
+                logger.debug("DB span end error: %s", e)
+
 
     def set_output(self, span: Any, output: dict) -> None:
         """
-        Set output on a span, capping any lists at 5 items to avoid large payloads
-        in the Langfuse UI.
+        Attach tool output to the span.
+        Caps list fields at 5 items to keep Langfuse payloads small.
         """
         if not self._enabled or isinstance(span, _NoOpSpan):
             return
 
-        try:
-            output_copy = output.copy()
-            for key, value in output_copy.items():
-                if isinstance(value, list) and len(value) > 5:
-                    output_copy[key] = {
-                        "count": len(value),
-                        "sample": value[:5],
-                        "note": f"Showing first 5 of {len(value)} items",
-                    }
+        truncated = {
+            k: {"count": len(v), "sample": v[:5], "note": f"First 5 of {len(v)}"}
+            if isinstance(v, list) and len(v) > 5
+            else v
+            for k, v in output.items()
+        }
 
-            if hasattr(span, "update"):
-                span.update(output=output_copy)
-                logger.info("Output set with %d fields", len(output_copy))
-
-            if hasattr(span, "_trace") and span._trace and hasattr(span._trace, "update"):
-                span._trace.update(output=output_copy)
-
-            from langfuse import get_client
-            get_client().flush()
-
-        except Exception as e:
-            logger.error("Set output error: %s", e)
+        span.update(output=truncated)
+        if hasattr(span, "_trace"):
+            span._trace.update(output=truncated)
 
     def record_error(self, span: Any, error: Exception, tool_name: str) -> None:
-        """Record an error on a span."""
+        """Attach error details to the span."""
         if not self._enabled or isinstance(span, _NoOpSpan):
             return
 
-        try:
-            if hasattr(span, "update"):
-                span.update(
-                    level="ERROR",
-                    status_message=str(error),
-                    output={"error": str(error), "type": type(error).__name__, "tool": tool_name},
-                )
-        except Exception as e:
-            logger.debug("Record error failed: %s", e)
+        span.update(
+            level="ERROR",
+            status_message=str(error),
+            output={
+                "error": str(error),
+                "type": type(error).__name__,
+                "tool": tool_name,
+            },
+        )
 
-    def record_db_rows(self, span: Any, rows: int, execution_time: float = None) -> None:
-        """Attach row count (and optional execution time) as span metadata."""
+    def record_db_rows(
+        self, span: Any, rows: int, execution_time: float | None = None
+    ) -> None:
+        """Attach query result count (and optional timing) to a DB child span."""
         if not self._enabled or isinstance(span, _NoOpSpan):
             return
 
-        try:
-            metadata = {"rows": rows}
-            if execution_time is not None:
-                metadata["execution_ms"] = round(execution_time, 2)
-            if hasattr(span, "update"):
-                span.update(metadata=metadata)
-        except Exception as e:
-            logger.debug("Record rows error: %s", e)
+        metadata: dict[str, Any] = {"rows": rows}
+        if execution_time is not None:
+            metadata["execution_ms"] = round(execution_time, 2)
+        span.update(metadata=metadata)
+
 
     def shutdown(self) -> None:
-        """Flush pending spans and shut down the Langfuse client."""
-        if self._enabled and self._client:
-            try:
-                self._client.flush()
-                import time
-                time.sleep(1)  # Give the background thread time to send before process exits
-                logger.info("Langfuse flushed successfully")
-            except Exception as e:
-                logger.error("Shutdown error: %s", e)
+        """Flush all pending spans before process exit."""
+        if not self._enabled or not self._client:
+            return
+        try:
+            self._client.flush()
+            time.sleep(1)
+            logger.info("Langfuse flushed on shutdown")
+        except Exception as e:
+            logger.error("Langfuse shutdown error: %s", e)
 
 
-_tracing_service_instance: Optional[TracingService] = None
+_instance: Optional[TracingService] = None
 
 
 def register_instance(service: TracingService) -> None:
-    global _tracing_service_instance
-    _tracing_service_instance = service
+    global _instance
+    _instance = service
 
 
 def get_tracing_service() -> Optional[TracingService]:
-    return _tracing_service_instance
+    return _instance
