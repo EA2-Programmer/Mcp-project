@@ -27,6 +27,9 @@ docs/MYREF.md
 .vscode/
 .idea/
 *.swp
+.idea
+./.idea
+/.idea
 
 # Logs
 *.log
