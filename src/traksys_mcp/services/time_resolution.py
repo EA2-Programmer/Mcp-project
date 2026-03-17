@@ -18,11 +18,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Module-level constants
 DAY_START = time(0, 0)
 DAY_END = time(23, 59, 59, 999_999)
 
-# Month name → number mapping (full + abbreviated, case-insensitive)
 MONTH_NAME_TO_NUM = {
     **{name.lower(): i for i, name in enumerate(month_name[1:], 1)},
     **{name.lower(): i for i, name in enumerate(month_abbr[1:], 1)},
