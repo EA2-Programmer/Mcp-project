@@ -81,7 +81,7 @@ async def get_materials(
         g.Name                          AS material_group_name,
         m.Units                         AS units,
         m.PlannedSize                   AS planned_size,
-        m.ModifiedDateTime              AS modified_datetime,
+        CONVERT(varchar(50), m.ModifiedDateTime, 127)   AS modified_datetime,
         m.VersionState                  AS version_state
     FROM tMaterial m
     LEFT JOIN tMaterialGroup g ON m.MaterialGroupID = g.ID
@@ -162,7 +162,7 @@ async def get_products_using_materials(
             p.ProductCode                   AS product_code,
             SUM(mua.Quantity)               AS total_quantity_used,
             COUNT(DISTINCT j.ID)            AS number_of_batches,
-            MAX(mua.DateTime)               AS last_used
+            CONVERT(varchar(50), MAX(mua.DateTime), 127)    AS last_used
         FROM tMaterialUseActual mua
         INNER JOIN tMaterial m ON mua.MaterialID = m.ID
         INNER JOIN tJob j      ON mua.JobID = j.ID
