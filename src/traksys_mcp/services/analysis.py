@@ -56,7 +56,7 @@ async def calculate_oee(
     # Step 3: Aggregate intervals and fetch scheduled time components
     sql = """
         SELECT 
-            i.Date AS period,
+            CONVERT(varchar(50), i.Date, 127)   AS period,
             SUM(DATEDIFF(second, i.StartDateTime, i.EndDateTime)) AS calendar_sec,
             SUM(i.SystemNotScheduledSeconds)    AS not_scheduled_sec,
             SUM(i.TotalCalculationUnitsCount)   AS total_units,
@@ -171,8 +171,8 @@ async def get_oee_downtime_events(
     sql = f"""
         SELECT TOP {safe_limit}
             e.ID AS event_id,
-            e.StartDateTime,
-            e.EndDateTime,
+            CONVERT(varchar(50), e.StartDateTime, 127) AS StartDateTime,
+            CONVERT(varchar(50), e.EndDateTime, 127)   AS EndDateTime,
             e.Impact AS impact_seconds,
             ed.Name AS event_category,
             ed.Description AS event_description,
