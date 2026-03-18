@@ -21,8 +21,9 @@ dependencies = [
     "pydantic-settings>=2.0.0",
     "python-dotenv>=1.0.0",
     "python-dateutil>=2.8.2",
-     "langfuse>=3.0.0,<4.0.0",
-
+    "dateparser>=1.2.0",
+    "langfuse>=3.0.0,<4.0.0",
+    "pandas>=2.0.0",
 ]
 
 [project.optional-dependencies]
