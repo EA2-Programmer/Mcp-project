@@ -1,4 +1,5 @@
 import logging
+import pandas as pd
 from typing import Any
 
 from src.traksys_mcp.core.database import execute_query
@@ -18,6 +19,7 @@ from src.traksys_mcp.utils.batch_queries import (
     build_quality_deviations_query,
     build_quality_remarks_query,
     build_quality_incomplete_tasks_query,
+    build_planned_bom_raw_query,
 )
 
 logger = logging.getLogger(__name__)
@@ -52,23 +54,20 @@ async def _resolve_system_name(system_name: str, trace_span=None) -> int | None:
 
 
 async def get_batches(
-        batch_id: int | None = None,
-        batch_name: str | None = None,
-        system_id: int | None = None,
-        system_name: str | None = None,
-        job_id: int | None = None,
-        time_window: str | None = None,
-        start_date: str | None = None,
-        end_date: str | None = None,
-        state: int | None = None,
-        limit: int = 50,
-        time_service: TimeResolutionService | None = None,
-        trace_span=None,
+    batch_id: int | None = None,
+    batch_name: str | None = None,
+    system_id: int | None = None,
+    system_name: str | None = None,
+    job_id: int | None = None,
+    time_window: str | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    state: int | None = None,
+    limit: int = 50,
+    time_service: TimeResolutionService | None = None,
+    trace_span=None,
 ) -> dict:
-    """
-    Query batches with intelligent time handling.
-    Joins: tBatch → tJob → tJobBatch → tProduct → tSystem → tShiftHistory
-    """
+    """Query batches with time handling also."""
     if batch_name and batch_id is None:
         batch_id = await _resolve_batch_name(batch_name, trace_span)
         if batch_id is None:
@@ -83,6 +82,7 @@ async def get_batches(
     actual_start = start_date
     actual_end = end_date
 
+    # FIX: Only resolve time_window if it's truthy. Don't pass empty string.
     if time_window and time_service:
         resolution = await time_service.resolve(time_window, table="tBatch")
         time_info = resolution
@@ -130,7 +130,7 @@ async def get_batches(
         "batches": batch_list,
         "count": len(batch_list),
         "methodology": {
-            "approach": "Batch query with time-intelligence and smart fallback",
+            "approach": "Batch query with time-awareness and fallback",
             "signals_checked": [
                 f"Queried tBatch joined with tJob, tProduct, tSystem, tShiftHistory ({len(batch_list)} batches returned)",
                 "Time window resolved via TimeResolutionService — natural language converted to exact dates",
@@ -138,14 +138,14 @@ async def get_batches(
                 "Batch name resolved to numeric ID via tBatch.Name / AltName / Lot lookup when provided",
             ],
             "verdict_logic": (
-                "No batch_id or batch_name required — omit both to query by time window or line. "
+                f"No batch_id or batch_name required — omit both to query by time window or line. "
                 f"Results ordered by StartDateTime DESC. Limit: {safe_limit}."
             ),
             "data_sources": ["tBatch", "tJob", "tJobBatch", "tProduct", "tSystem", "tShiftHistory"],
             "coverage": (
-                f"{len(batch_list)} batches returned"
-                + (f" (system_id={system_id})" if system_id else "")
-                + (f" from {actual_start} to {actual_end}" if actual_start else "")
+                f"{len(batch_list)} batches returned "
+                + (f" (system_id={system_id}) " if system_id else " ")
+                + (f" from {actual_start} to {actual_end} " if actual_start else " ")
             ),
         },
     }
@@ -154,7 +154,6 @@ async def get_batches(
         result["time_info"] = time_info
 
     return result
-
 
 async def get_batch_parameters(
         batch_id: int | None = None,
@@ -273,13 +272,14 @@ async def get_batch_materials(
         time_window: str | None = None,
         start_date: str | None = None,
         end_date: str | None = None,
+        include_planned_bom: bool = True,
         limit: int = 100,
         time_service: TimeResolutionService | None = None,
         trace_span=None,
 ) -> dict:
     """
-    Retrieve actual material usage per batch.
-    Supports lookup by batch_id, batch_name (resolves to job_id), or direct job_id.
+    Retrieve actual material usage per batch + optional planned BOM from _SAPBOM.
+    Planned BOM quantities are aggregated in Python to avoid SQL Server grouping issues.
     """
     safe_limit = max(1, min(int(limit), 1000))
 
@@ -298,6 +298,25 @@ async def get_batch_materials(
         else:
             return {"materials": [], "count": 0, "message": f"No job found for batch_id {batch_id}"}
 
+    #  Get product code/version for planned BOM lookup
+    product_code = None
+    product_version = None
+    if include_planned_bom and job_id is not None:
+        sql_product = """
+            SELECT TOP 1 p.ProductCode, p.Version
+            FROM tJob j
+            INNER JOIN tProduct p ON j.ProductID = p.ID
+            WHERE j.ID = ?
+        """
+        _, rows = await execute_query(
+            sql_product, (job_id,),
+            trace_span=trace_span, span_name="product_lookup"
+        )
+        if rows and rows[0][0]:
+            product_code = rows[0][0]
+            product_version = rows[0][1]
+
+    #  Time window handling
     time_info = None
     actual_start = start_date
     actual_end = end_date
@@ -308,11 +327,11 @@ async def get_batch_materials(
         actual_start = resolution["actual"]["start"]
         actual_end = resolution["actual"]["end"]
 
+    # Actual material consumption
     where_parts: list[str] = []
     params: list[Any] = []
 
     if job_id is not None:
-        # Specific batch/job mode — join via job_id
         where_parts.append("mua.JobID = ?")
         params.append(job_id)
         if actual_start:
@@ -322,7 +341,6 @@ async def get_batch_materials(
             where_parts.append("mua.DateTime <= ?")
             params.append(actual_end)
     else:
-        # Open-ended mode — filter by time range via tBatch join
         if actual_start:
             where_parts.append("b.StartDateTime >= ?")
             params.append(actual_start)
@@ -350,35 +368,100 @@ async def get_batch_materials(
     )
     materials = rows_to_dicts(columns, rows)
 
+    planned_bom = []
+    if include_planned_bom and product_code:
+        include_version = product_version is not None
+        bom_params: list[Any] = [product_code]
+        if include_version:
+            bom_params.append(product_version)
+
+        # Use raw query – no GROUP BY
+        raw_sql = """
+            SELECT
+                bom.OpAc            AS operation_step,
+                bom.Component       AS material_code,
+                bom.BOMComponent    AS material_name,
+                bom.Quantity        AS quantity,
+                bom.Un              AS planned_unit
+            FROM _SAPBOM bom
+            WHERE bom.Material = ?
+              {}
+            """.format("AND bom.Version = ?" if include_version else "")
+
+        columns_bom, rows_bom = await execute_query(
+            raw_sql,
+            tuple(bom_params),
+            trace_span=trace_span,
+            span_name="planned_bom_raw",
+        )
+
+        if rows_bom:
+            df = pd.DataFrame(rows_bom, columns=[c[0] for c in columns_bom])
+
+            # Aggregate: sum per (operation_step, material_code, material_name, planned_unit)
+            agg_df = (
+                df.groupby(
+                    ['operation_step', 'material_code', 'material_name', 'planned_unit'],
+                    as_index=False
+                )
+                ['quantity']
+                .sum()
+                .rename(columns={'quantity': 'total_planned_qty'})
+                .sort_values(['operation_step', 'material_code'])
+            )
+
+            planned_bom = agg_df.to_dict(orient='records')
+
+            logger.info(
+                "Planned BOM: fetched %d raw rows → aggregated to %d lines for product %s",
+                len(rows_bom), len(planned_bom), product_code
+            )
+
     logger.info(
-        "get_batch_materials → %d rows (batch_id=%s, batch_name=%s, job_id=%s)",
-        len(materials), batch_id, batch_name, job_id,
+        "get_batch_materials → actual=%d rows | planned_bom=%d rows (batch_id=%s, job_id=%s)",
+        len(materials), len(planned_bom), batch_id, job_id,
     )
 
     unique_materials = list({m.get("material_name", "?") for m in materials})
     total_qty = sum(float(m.get("consumed_quantity") or 0) for m in materials)
-    unique_batches = len({m.get("batch_id") for m in materials})
+    unique_batches = len({m.get("batch_id") for m in materials if m.get("batch_id")})
+
+    signals_checked = [
+        f"Retrieved {len(materials)} material consumption records from tMaterialUseActual",
+        f"Covered {unique_batches} batch(es) across {len(unique_materials)} material type(s)",
+        "Quantities in KGR (Kilogram Reactive — pharmaceutical unit, not standard KG)",
+        "Silo source not available: tLocation is empty (SAP integration not yet active).",
+    ]
+
+    if planned_bom:
+        signals_checked.append(
+            f"Planned BOM: {len(planned_bom)} aggregated lines retrieved from _SAPBOM for product '{product_code}'. "
+            "Note: planned quantities are in KG, actual in KGR — do not compare numbers directly."
+        )
+    elif include_planned_bom:
+        signals_checked.append(
+            "Planned BOM not available — product code could not be resolved from job."
+        )
 
     result: dict[str, Any] = {
-        "materials": materials,
-        "count": len(materials),
+        "actual_consumption": materials,
+        "actual_count": len(materials),
+        "planned_bom": planned_bom,
+        "planned_bom_count": len(planned_bom),
         "methodology": {
-            "approach": "Material consumption tracing via tBatch → tJob → tMaterialUseActual",
-            "signals_checked": [
-                f"Retrieved {len(materials)} material consumption records from tMaterialUseActual",
-                f"Covered {unique_batches} batch(es) across {len(unique_materials)} material type(s)",
-                "Quantities in KGR (Kilogram Reactive — pharmaceutical unit, not standard KG)",
-                "Silo source not available: tLocation is empty (SAP integration not yet active).",
-            ],
+            "approach": "Material consumption tracing via tBatch → tJob → tMaterialUseActual + planned BOM from _SAPBOM (aggregated in Python)",
+            "signals_checked": signals_checked,
             "verdict_logic": (
                 "No batch_id required — use time_window to query consumption across a date range. "
-                "When batch_id is given, resolves to JobID first, then queries tMaterialUseActual."
+                "When batch_id is given, resolves to JobID first, then queries tMaterialUseActual. "
+                "Planned BOM fetched from _SAPBOM when product code is resolvable (aggregation performed in Python to avoid SQL grouping issues)."
             ),
-            "data_sources": ["tMaterialUseActual", "tMaterial", "tBatch", "tJob"],
+            "data_sources": ["tMaterialUseActual", "tMaterial", "tBatch", "tJob", "_SAPBOM"],
             "coverage": (
-                f"{len(materials)} records, {len(unique_materials)} material types"
+                f"{len(materials)} actual records, {len(unique_materials)} material types"
                 + (f", total: {round(total_qty, 2)} KGR" if total_qty > 0 else "")
                 + (f" across {unique_batches} batch(es)" if unique_batches > 1 else "")
+                + (f" | {len(planned_bom)} planned BOM lines" if planned_bom else "")
             ),
         },
     }

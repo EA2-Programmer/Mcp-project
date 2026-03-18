@@ -9,6 +9,8 @@ import pyodbc
 
 from src.traksys_mcp.config.setting import settings
 from .exceptions import DatabaseConnectionError, DatabaseError, QueryTimeoutError, SecurityError, ValidationError
+import struct
+from datetime import datetime, timezone, timedelta
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +44,6 @@ def _validate_sql(sql: str) -> None:
             f"Query length {len(sql)} exceeds MAX_QUERY_LENGTH={settings.MAX_QUERY_LENGTH}"
         )
 
-    # Trailing semicolon is allowed; a semicolon mid-query means multi-statement
     stripped = sql.strip().rstrip(";")
     if ";" in stripped:
         raise SecurityError("Multi-statement queries are not permitted")
@@ -77,7 +78,30 @@ def _get_connection():
             autocommit=False,
             timeout=settings.MSSQL_CONNECTION_TIMEOUT,
         )
-        conn.add_output_converter(-155, lambda raw: raw.decode("utf-16-le"))
+
+        # ---------------------------------------------------------
+        # CLEAN FIX: Let the MS ODBC Driver handle text natively.
+        # Only safely catch datetimeoffset (-155) strings.
+        # ---------------------------------------------------------
+        def handle_datetimeoffset(dto_value):
+            if not dto_value:
+                return None
+
+            # If the driver returns the clean SQL string (e.g. '2024-11-11 11:46:35.000 +01:00')
+            if isinstance(dto_value, str):
+                return dto_value
+
+            # Safe catch for raw bytes without using str() which causes "b'...'"
+            if isinstance(dto_value, bytes):
+                try:
+                    return dto_value.decode('utf-8', errors='ignore').strip('\x00')
+                except Exception:
+                    pass
+
+            return str(dto_value)
+
+        conn.add_output_converter(-155, handle_datetimeoffset)
+
         yield conn
     except pyodbc.Error as e:
         logger.error("Connection failed: %s", e)
@@ -88,7 +112,6 @@ def _get_connection():
                 conn.close()
             except Exception:
                 pass
-
 
 async def execute_query(
     sql: str,
@@ -137,7 +160,7 @@ async def execute_query(
                     batch = cursor.fetchmany(_FETCH_BATCH_SIZE)
                     if not batch:
                         break
-                    rows.extend(batch)
+                    rows.extend(tuple(row) for row in batch)
                     if len(rows) >= _max_rows:
                         rows = rows[:_max_rows]
                         logger.warning("Row limit hit — capped at %d | hash=%s", _max_rows, sql_hash)
@@ -149,10 +172,9 @@ async def execute_query(
             finally:
                 try:
                     cursor.close()
-                except Exception:
+                except (pyodbc.Error, AttributeError):
                     pass
 
-    # Lazy import avoids circular dependency: database → tracing → settings
     _tracing = _get_tracing_service()
 
     try:
@@ -184,9 +206,10 @@ def _get_tracing_service():
     Returns a no-op stub if not yet initialised (e.g. during startup health checks).
     """
     try:
-        from src.traksys_mcp.services.tracing import _tracing_service_instance
-        if _tracing_service_instance is not None:
-            return _tracing_service_instance
+        from src.traksys_mcp.services.langfuse_tracing import get_tracing_service
+        instance = get_tracing_service()
+        if instance is not None:
+            return instance
     except ImportError:
         pass
 

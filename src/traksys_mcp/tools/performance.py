@@ -11,56 +11,43 @@ from src.traksys_mcp.models.tool_inputs import GetEquipmentStateInput
 
 if TYPE_CHECKING:
     from fastmcp import FastMCP
-    from src.traksys_mcp.services.time_resolution import TimeResolutionService
     from src.traksys_mcp.services.langfuse_tracing import TracingService
-
 
 class PerformanceTools:
     """
-    Performance tool collection.
-
-    Encapsulates all equipment and OEE related tools with tracing injected
-    alongside TimeResolutionService.
+    Tools for checking live equipment status on the factory floor.
     """
 
     def __init__(
         self,
         mcp: "FastMCP",
-        time_service: "TimeResolutionService",
-        tracing: "TracingService",                                 # ← NEW
+        tracing: "TracingService",
     ):
         self.mcp = mcp
-        self.time_service = time_service
-        self.tracing = tracing                                     # ← NEW
+        self.tracing = tracing
         self.logger = logging.getLogger(__name__)
 
     def register(self) -> None:
-        """Register all performance tools."""
         self._register_get_equipment_state()
 
     def _register_get_equipment_state(self) -> None:
 
         @self.mcp.tool(
             name="get_equipment_state",
-            description="""Get real-time status, downtime, and performance metrics for manufacturing equipment.
+            description="""Get the LIVE, real-time status of manufacturing equipment.
 
-**Use this tool when the user asks about:**
-- "What is the status of Packer 01?"
-- "Which machines are currently idle?"
-- "Show me OEE for the filling line yesterday."
-- "What are the live tag values for the Boiler?"
-- "How much downtime did Area 5 have last week?"
+**Use this tool when the user asks:**
+- "What is running on the Packaging Line right now?"
+- "Are there any active faults on the Labeler?"
+- "List all active machines in Area 2."
+- "Is Machine E1 currently running a job?"
 
-**Intelligent Features:**
-- **Live Status**: Shows if a machine is 'Running' or 'Idle' based on open production sessions.
-- **Real-time Tags**: Can fetch live counts, product codes, and speeds directly from tTag.
-- **OEE & Availability**: Calculates runtime and session counts over any natural language time period.
-- **Smart Fallback**: If requested dates have no data, automatically finds the most recent available data.
+**DO NOT use this tool for historical data or OEE.** If the user asks "How did we do yesterday?" or "What was the OEE?", use `calculate_oee`.
 
 **Key Parameters:**
-- `system_name`: Human name of the machine (e.g., 'Packer 01').
-- `include_tags`: Set to true for live speeds/counts.
-- `include_oee`: Set to true for downtime/availability analysis.
+- `system_name`: Equipment name (e.g., 'Line E1').
+- `area_id`: To see all machines in a physical zone.
+- `include_active_faults`: Set to True to check if the machine is currently broken/stopped.
 """
         )
         async def get_equipment_state(params: GetEquipmentStateInput) -> dict:
@@ -68,47 +55,26 @@ class PerformanceTools:
             async with self.tracing.trace_tool("get_equipment_state", inputs) as span:
                 try:
                     result = await performance.get_equipment_state(
-                        time_service=self.time_service,
-                        trace_span=span,                           # ← NEW
+                        trace_span=span,
                         **inputs,
                     )
 
                     equipment_list = result["equipment"]
-                    time_info      = result.get("time_info")
 
                     if not equipment_list:
-                        response = ToolResponse.no_data(
+                        return ToolResponse.no_data(
                             suggestions=[
                                 "Verify the system_name or system_id is correct",
-                                "Ensure the equipment is enabled in tSystem",
-                                "Try a broader area_id or time_window",
-                            ],
-                            time_info=time_info,
-                        )
-                    elif time_info and time_info.get("fallback_triggered"):
-                        response = ToolResponse.partial(
-                            data=equipment_list,
-                            time_info=time_info,
-                            message=time_info.get("message"),
-                        )
-                    else:
-                        response = ToolResponse.success(
-                            data=equipment_list,
-                            time_info=time_info,
-                        )
+                                "Ensure the equipment is enabled (IsTemplate=0) in tSystem",
+                            ]
+                        ).to_dict()
 
-                    self.tracing.set_output(span, response.to_dict())   # ← NEW
-                    return response.to_dict()
+                    return ToolResponse.success(data=equipment_list).to_dict()
 
                 except Exception as e:
-                    self.tracing.record_error(span, e, "get_equipment_state")  # ← NEW
+                    self.tracing.record_error(span, e, "get_equipment_state")
                     self.logger.error("get_equipment_state failed: %s", e, exc_info=True)
                     return ToolResponse.error(
                         message=str(e),
-                        suggestions=[
-                            "Verify the system_name or system_id is correct",
-                            "Check if the equipment is Enabled in tSystem",
-                            "Try 'last 7 days' to see historical performance",
-                            "Ensure tTag and tJobSystemActual tables are accessible",
-                        ]
+                        suggestions=["Verify the system_name or system_id is correct"]
                     ).to_dict()
