@@ -168,6 +168,7 @@ class TracingService:
             logger.error("Trace setup failed for %s: %s", tool_name, e)
             yield _NOOP
             return
+
         try:
             wrapper.end()
         except Exception as e:
@@ -204,22 +205,22 @@ class TracingService:
 
     def set_output(self, span: Any, output: dict) -> None:
         """
-        Attach tool output to the span.
-        Caps list fields at 5 items to keep Langfuse payloads small.
+        Attach complete tool output to the span.
+
+        Full raw data is preserved for complete observability.
+        Langfuse handles large payloads efficiently; truncation is not needed.
+
+        Args:
+            span: The span to update
+            output: Complete output data to attach
         """
         if not self._enabled or isinstance(span, _NoOpSpan):
             return
 
-        truncated = {
-            k: {"count": len(v), "sample": v[:5], "note": f"First 5 of {len(v)}"}
-            if isinstance(v, list) and len(v) > 5
-            else v
-            for k, v in output.items()
-        }
-
-        span.update(output=truncated)
+        # Send full, untruncated data
+        span.update(output=output)
         if hasattr(span, "_trace"):
-            span._trace.update(output=truncated)
+            span._trace.update(output=output)
 
     def record_error(self, span: Any, error: Exception, tool_name: str) -> None:
         """Attach error details to the span."""

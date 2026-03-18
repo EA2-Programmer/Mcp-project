@@ -1,31 +1,28 @@
-id,category,query,expected_tool,expected_params,expected_answer,tolerance
-1,oee,"What was OEE on Line E1 on 2026-03-13?",calculate_oee,"{""system_name"":""E1"",""include_oee"":true,""time_window"":""2026-03-13""}",97.3,0.5
-2,oee,"Breakdown OEE on E1 for 2026-03-13 into availability, performance and quality",get_equipment_state,"{""system_name"":""E1"",""include_oee"":true,""time_window"":""2026-03-13""}","A:99.0, P:98.9, Q:99.4",0.5
-3,oee,"Compare OEE between E1 and E2 on 2026-03-13",get_equipment_state,"{""system_name"":""E1"",""include_oee"":true,""time_window"":""2026-03-13""}","E1:97.3, E2:90.6",0.5
-4,oee,"What was the availability on E2 for 2026-03-13?",get_equipment_state,"{""system_name"":""E2"",""include_oee"":true,""time_window"":""2026-03-13""}",95.8,0.5
-5,oee,"What was the quality on E3 for 2026-03-13?",get_equipment_state,"{""system_name"":""E3"",""include_oee"":true,""time_window"":""2026-03-13""}",98.3,0.5
-6,downtime,"What downtime events occurred on E2 on 2026-03-12?",get_equipment_state,"{""system_name"":""E2"",""include_oee"":true,""time_window"":""2026-03-12""}","Motor Fault (20 min), Infeed Jam (25 min), Sensor Failure (15 min)",
-7,downtime,"How much total downtime did E2 have on 2026-03-12?",get_equipment_state,"{""system_name"":""E2"",""include_oee"":true,""time_window"":""2026-03-12""}",60,
-8,downtime,"What was the longest downtime event on E2 on 2026-03-12?",get_equipment_state,"{""system_name"":""E2"",""include_oee"":true,""time_window"":""2026-03-12""}","Infeed Jam (25 min)",
-9,batches,"Find batch 00001_FAC1_00010001_SubPO1_MBR1_0020_A1_1",get_batches,"{""batch_name"":""00001_FAC1_00010001_SubPO1_MBR1_0020_A1_1""}","Batch found: ID 456",
-10,quality,"Show me all parameters recorded for batch 456",get_batch_parameters,"{""batch_id"":456}","Filling Weight:15.2, Temperature:11.5,11.7,12,10.4",
-11,quality,"Were there any out-of-spec readings for batch 460?",get_batch_parameters,"{""batch_id"":460,""deviation_only"":true}","Yes - Filling Weight = 22 (max allowed is 20)",
-12,batches,"Show me batches from September 1, 2025 on E1",get_batches,"{""system_name"":""E1"",""time_window"":""2025-09-01""}","Batch 456, 457, 458, 459",
-13,quality,"Compare quality between batch 456 and 460",get_batch_quality_analysis,"{""batch_id"":456}","Batch 456: 0 deviations (perfect). Batch 460: 7 deviations (temperature and filling weight out of spec)",
-14,quality,"What caused batch 460 to fail quality inspection?",get_batch_quality_analysis,"{""batch_id"":460}","Temperature control failure (readings from 6-22°C vs required 10-15°C) and filling weight too high (22 vs max 20)",
-15,quality,"Show me all batches with quality issues on September 1, 2025",get_batch_quality_analysis,"{""time_window"":""2025-09-01""}","Only batch 460 had issues. Batches 456,457,458,459 were within spec.",
-16,materials,"How many materials are in the system?",get_batch_materials,"{}","3 materials: Material 1, Material 3, Material 4",
-17,materials,"Show me all materials in the system with their groups",get_batch_materials,"{}","Material 1 (M1), Material 3 (M3), Material 4 (M4) - all in Group 1",
-18,materials,"What products use these materials?",get_batch_materials,"{}","All three materials used to make product P00001_FAC1_0001",
-19,jobs,"Show me job information for batch 456",get_batch_details,"{""batch_id"":456}","Job ID 1226, product information from tJob",
-20,tasks,"How many compliance tasks were completed?",analyze_task_compliance,"{}","Out of 310 total tasks: 129 completed, 181 incomplete",
-21,tasks,"Which compliance tasks fail most often?",analyze_task_compliance,"{}","Tasks with 'Compulsory' and 'Retentive' flags have highest failure rate",
-22,equipment,"What is the current status of Line E1?",get_equipment_state,"{""system_name"":""E1""}","E1 is currently Idle with no active job",
-23,equipment,"Show me live tag values for E1",get_equipment_state,"{""system_name"":""E1"",""include_tags"":true}","Current counts, product, batch if available",
-24,oee,"Show me OEE trend for E1 from March 10-13, 2026",get_equipment_state,"{""system_name"":""E1"",""include_oee"":true,""time_window"":""last 4 days""}","Daily OEE values: 86.4%, 91.7%, 92.1%, 97.3%",0.5
-25,downtime,"How much downtime did E2 have on March 12, 2026?",get_equipment_state,"{""system_name"":""E2"",""include_oee"":true,""time_window"":""2026-03-12""}","60 minutes total across 3 events",
-26,tasks,"Show me tasks with capture data",get_batch_tasks,"{""include_capture"":true}","Tasks include categories: S4 (Solvents), S5 (Cleaning), S2 (Intermediate)",
-27,tasks,"Which task categories have the most incomplete tasks?",analyze_task_compliance,"{}","S4 (Solvents) and S5 (Cleaning) tasks show highest incomplete rates",
-
-
-
+id,category,query,expected_tool,expected_answer,notes
+1,products,What products do we have available?,get_products,"2 products: P00001_FAC1_0001 (ID 93) and P00001_FAC1_0002 (ID 94) — both Version 1","Both products confirmed in tProduct"
+2,products,Which products have never run a batch?,get_products,"P00001_FAC1_0002 has never run a batch (batch_count=0)","Confirmed via LEFT JOIN tBatch"
+3,batches,Show me all batches,get_batches,"26 batches total","COUNT(*) = 26 from tBatch"
+4,batches,Which batches were aborted?,get_batches,"3 aborted batches: ID 459 (Sep 1-3), ID 463 (Sep 3-4), ID 469 (Sep 4-8) — all State=5","Confirmed from tBatch WHERE State=5"
+5,batches,Show me batches from September 2025,get_batches,"26 batches all ran in September 2025 between Sep 1 and Sep 16","All 26 batches fall within Sep 2025"
+6,batches,Find batch 00001_FAC1_00010001_SubPO1_MBR1_0020_A1_1,get_batches,"Batch found: ID 456 State=3 (Completed) started 2025-09-01 11:08:30 ended 11:08:31","Confirmed in tBatch"
+7,batches,Give me full details for batch 469,get_batch_details,"Batch 469 State=5 (Aborted) ran Sep 4-8 2025. 1 step: Discharging (4 seconds). No operator remarks. No compliance tasks recorded.","Steps confirmed — only Discharging step found"
+8,batches,What did operators note during batch 456?,get_batch_details,"6 remarks all saying 'confirm' entered by Macarena Heredia on 2025-09-01","Confirmed from _DBR"
+9,batches,Were all compliance tasks completed for batch 456?,get_batch_details,"Yes — 2 tasks both Completed: Formulary (completed 11:08:51) and SAMPLE (completed 11:09:37)","Confirmed from tTask"
+10,parameters,Were there any out-of-spec readings for batch 460?,get_batch_parameters,"Yes — 7 deviations: Filling Weight=22 (max 20) and Temperature batch readings of 6 16 22 9 22 16 — all outside 10-15°C range","Confirmed from tBatchParameter"
+11,parameters,What was the filling weight for batch 461?,get_batch_parameters,"No data — batch 461 has no Filling Weight parameter recorded","Query returned no output for batch 461"
+12,parameters,Which batches had out-of-spec readings in September 2025?,get_batch_parameters,"5 batches with deviations: 460 (Filling Weight + Temperature) 462 (Filling Weight + Temperature) 464 (Temperature only) 466 (Filling Weight + Temperature) 468 (Filling Weight + Temperature)","Confirmed from tBatchParameter vs tParameterDefinition"
+13,quality,Were there quality issues with batch 468?,get_batch_quality_analysis,"Yes — 2 parameter deviations (Filling Weight=7 below min 10 and Temperature=17 above max 15) and 1 incomplete SAMPLE task","Confirmed from tBatchParameter and tTask"
+14,quality,What caused batch 459 to be aborted?,get_batch_quality_analysis,"Operator remark by Carlos Sabio on 2025-09-08: 'sdfsdf' (data quality issue in source system). No parameter deviations recorded for this batch.","No deviations found — only remark with unclear content"
+15,quality,Show me all batches with quality issues in September 2025,get_batch_quality_analysis,"5 batches with parameter deviations: 460 462 464 466 468","Confirmed via EXISTS query"
+16,materials,What raw materials do we have in the system?,get_materials,"8 materials: Material 1 (M1) Material 2 (M2) Material 3 (M3) Material 4 (M4) Material 5 (M5) Material 6 (M6) Material 7 (M7) Material 8 (M8) — all in BOM Raw Materials group","Confirmed from tMaterial"
+17,materials,What materials were used in batch 457?,get_batch_materials,"Material 1 (M1) consumed 3 times: 10 KG + 3.2 KG + 1.95 KG = 15.15 KG total","Confirmed from tMaterialUseActual"
+18,materials,Which products consume Material 4?,get_products_using_materials,"P00001_FAC1_0001 used Material 4 (M4) — total 6.84 KG across 3 batches","Confirmed from tMaterialUseActual joined to tProduct"
+19,recipes,What recipes do we have?,get_recipe,"26 recipes for P00001_FAC1_0001 and 1 recipe for P00001_FAC1_0002 — names include MBR1 MBR2 Parsec Summit 2025 Chocolate PoC and Chocolate PoC New series. All descriptions are empty.","Confirmed from tRecipe"
+20,recipes,What recipe was used for batch 481?,get_recipe,"Recipe ID 612: Chocolate PoC New_0240_Line 1","Confirmed from tJobBatch joined to tRecipe"
+21,recipes,What recipes exist for product P00001_FAC1_0001?,get_recipe,"26 recipes — IDs 588-615 excluding 610 — covering MBR1 MBR2 Parsec Summit and Chocolate PoC New series. All descriptions empty.","Confirmed from tRecipe joined to tProduct"
+22,tasks,What tasks are assigned to batch 477?,get_batch_tasks,"2 tasks both Incomplete: Weighing Checklist (created Sep 16 09:39) and Weighing Checklist (created Sep 16 10:38). No sample category or compulsory flags recorded.","Confirmed from tTask"
+23,tasks,Show me all incomplete tasks for batch 462,get_batch_tasks,"2 incomplete tasks: Formulary (no category) and SAMPLE (S1 Raw Materials Compulsory) — neither completed","Confirmed from tTask WHERE PassFail=-1"
+24,tasks,What is the overall compliance rate?,analyze_task_compliance,"50% compliance rate — 10 completed out of 20 total tasks (10 incomplete)","Confirmed from tTask joined to tBatch — total=20 completed=10 incomplete=10"
+25,oee,What was the OEE for E1 on 2026-03-12?,calculate_oee,"98.2% OEE for 2026-03-12 — Availability 99.65% Performance 99.16% Quality 99.37%","Calculated from tOeeInterval grouped by date — 3 intervals summed"
+26,oee,What downtime events occurred on E2 on 2026-03-12?,get_oee_downtime_events,"3 events: Motor Fault 20 min (08:15-08:35) by System — Infeed Jam 25 min (16:30-16:55) by Operator_John — Sensor Failure 15 min (22:10-22:25) by System. Total impact: 3600 seconds.","Confirmed from tEvent joined to tEventDefinition"
+27,equipment,What is the current status of line E1?,get_equipment_state,"E1 is currently Idle — no active job running (EndDateTime IS NULL returned no rows)","Confirmed from tJobSystemActual"

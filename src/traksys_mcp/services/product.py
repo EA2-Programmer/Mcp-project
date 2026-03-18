@@ -159,8 +159,8 @@ async def get_recipe(
                 b.ID                AS batch_id,
                 b.Name              AS batch_name,
                 b.State             AS state,
-                CONVERT(nvarchar(30), b.StartDateTime, 126) AS batch_start,
-                CONVERT(nvarchar(30), b.EndDateTime,   126) AS batch_end,
+                b.StartDateTime     AS batch_start,
+                b.EndDateTime       AS batch_end,
                 j.ID                AS job_id,
                 j.Name              AS job_name,
                 s.Name              AS system_name
@@ -245,7 +245,7 @@ async def get_products(
                 p.StandardUnits     AS standard_units,
                 p.Enabled           AS enabled,
                 COUNT(b.ID)         AS batch_count,
-                MAX(CONVERT(nvarchar(30), b.StartDateTime, 126)) AS last_batch_date
+                MAX(b.StartDateTime) AS last_batch_date
             FROM tProduct p
             LEFT JOIN tJob   j ON j.ProductID = p.ID
             LEFT JOIN tBatch b ON b.JobID     = j.ID

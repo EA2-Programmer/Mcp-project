@@ -4,7 +4,6 @@ Batch-related MCP tools with tracing and time resolution injected.
 
 import logging
 from typing import TYPE_CHECKING
-
 from src.traksys_mcp.models.tool_outputs import ToolResponse
 from src.traksys_mcp.services import batches
 from src.traksys_mcp.models.tool_inputs import (
@@ -165,24 +164,24 @@ that has ever been produced.
             name="get_batch_materials",
             description="""Retrieve actual RAW MATERIAL consumption/usage for a batch or date range.
 
-**Use this tool when the user asks about:**
-- "What materials were used in batch AA001?"
-- "How much Sugar was consumed last week?"
-- "Show material usage for job 12345"
-- "Were the right amounts of materials used in batch 462?"
-- "Compare planned vs actual material consumption"
-- "How much of Material 3 did we use this month?"
+    **Use this tool when the user asks about:**
+    - "What materials were used in batch AA001?"
+    - "How much Sugar was consumed last week?"
+    - "Show material usage for job 12345"
+    - "Were the right amounts of materials used in batch 462?"
+    - "Compare planned vs actual material consumption"
+    - "How much of Material 3 did we use this month?"
 
-**DO NOT use this tool for finished product questions.**
-This tool returns raw material consumption (tMaterialUseActual), not finished products.
-For finished products, use `get_batches`.
+    **DO NOT use this tool for finished product questions.**
+    This tool returns raw material consumption (tMaterialUseActual), not finished products.
+    For finished products, use `get_batches`.
 
-**Returns two sections when include_planned_bom=True (default):**
-- `actual_consumption`: What was actually used (tMaterialUseActual)
-- `planned_bom`: What SAP said should be used per operation step (_SAPBOM)
+    **Returns two sections when include_planned_bom=True (default):**
+    - `actual_consumption`: What was actually used (tMaterialUseActual)
+    - `planned_bom`: What SAP said should be used per operation step (_SAPBOM)
 
-**Note on units:** Actual quantities in KGR, planned quantities in KG — not directly comparable.
-"""
+    **Note on units:** Actual quantities in KGR, planned quantities in KG — not directly comparable.
+    """
         )
         async def get_batch_materials(params: GetBatchMaterialsInput) -> dict:
             inputs = params.model_dump()
@@ -192,7 +191,7 @@ For finished products, use `get_batches`.
                         time_service=self.time_service, trace_span=span, **inputs,
                     )
                     response = _build_response(
-                        data=result["materials"],
+                        data=result["actual_consumption"],
                         time_info=result.get("time_info"),
                         no_data_suggestions=[
                             "Verify the batch_id, batch_name, or job_id is correct",
@@ -202,6 +201,7 @@ For finished products, use `get_batches`.
                     )
                     self.tracing.set_output(span, response.to_dict())
                     return response.to_dict()
+
                 except Exception as e:
                     self.tracing.record_error(span, e, "get_batch_materials")
                     self.logger.error("get_batch_materials failed: %s", e, exc_info=True)

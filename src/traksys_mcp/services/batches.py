@@ -538,7 +538,7 @@ async def get_batch_details(
         "tasks_count":      len(compliance_tasks),
         "incomplete_tasks": incomplete_task_count,
         "methodology": {
-            "approach": "Full batch drill-down across four independent data sections",
+            "approach": "Full batch analysis across four independent data sections",
             "signals_checked": [
                 "Batch header: core info from tBatch joined with tJob, tProduct, tSystem",
                 f"Steps: {len(steps)} execution steps from tBatchStep + tFunctionDefinition",
