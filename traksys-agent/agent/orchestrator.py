@@ -28,11 +28,11 @@ class AgentOrchestrator:
 
         full_messages = [{"role": "system", "content": self.system_prompt}] + messages
         tools = await self.registry.get_openai_tools()
+        max_iterations = 10
+        iteration = 0
 
-        # Filter out get_equipment_state based on current agent configuration
-        tools = [t for t in tools if t["function"]["name"] != "get_equipment_state"]
-
-        while True:
+        while iteration < max_iterations:
+            iteration += 1
             self.logger.info("Calling LLM to determine next action...")
 
             # Step 1: Use stream=False for the decision phase. It's much safer for parsing parallel tool calls.
@@ -97,3 +97,7 @@ class AgentOrchestrator:
             full_messages.extend(tool_results)
 
             # The loop will now restart, feeding the tool results back to the LLM
+        else:
+            # Exceeded max_iterations — yield a safe fallback message
+            self.logger.error("Agent exceeded max_iterations (%d). Returning fallback response.", max_iterations)
+            yield "I wasn't able to complete this request — the reasoning loop exceeded its limit. Please try rephrasing your question or narrowing the scope."
