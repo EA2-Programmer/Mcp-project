@@ -192,7 +192,7 @@ For finished products, use `get_batches`.
                         time_service=self.time_service, trace_span=span, **inputs,
                     )
                     response = _build_response(
-                        data=result.get("actual_consumption", []),
+                        data=result["materials"],
                         time_info=result.get("time_info"),
                         no_data_suggestions=[
                             "Verify the batch_id, batch_name, or job_id is correct",
