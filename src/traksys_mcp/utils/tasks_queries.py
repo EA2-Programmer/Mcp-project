@@ -17,8 +17,8 @@ def build_batch_tasks_query(limit: int, where_clause: str) -> str:
             t.Capture02                 AS is_compulsory,
             t.Capture03                 AS is_retentive,
             t.Capture04                 AS requires_analysis,
-            t.CreatedDateTime           AS created_at,
-            t.CompletedDateTime         AS completed_at,
+            CONVERT(varchar(50), t.CreatedDateTime, 127)   AS created_at,
+            CONVERT(varchar(50), t.CompletedDateTime, 127) AS completed_at,
             DATEDIFF(
                 SECOND,
                 t.CreatedDateTime,

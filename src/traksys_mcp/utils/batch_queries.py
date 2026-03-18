@@ -21,20 +21,19 @@ _BATCH_COLUMNS = """
     b.SystemID                          AS system_id,
     b.JobID                             AS job_id,
     b.State                             AS state,
-    b.StateRequested                    AS state_requested,
-    b.StartDateTime                     AS start_datetime,
-    b.EndDateTime                       AS end_datetime,
-    b.Date                              AS batch_date,
+    CONVERT(nvarchar(30), b.StartDateTime, 127) AS start_datetime,
+    CONVERT(nvarchar(30), b.EndDateTime, 127) AS end_datetime,
+    CONVERT(nvarchar(10), b.Date, 127)  AS batch_date,
     b.PlannedBatchSize                  AS planned_batch_size,
     b.ActualBatchSize                   AS actual_batch_size,
     b.PlannedBatchDurationSeconds       AS planned_duration_seconds,
     j.Name                              AS job_name,
     j.Lot                               AS job_lot,
-    j.PlannedStartDateTime              AS job_planned_start,
+    CONVERT(nvarchar(30), j.PlannedStartDateTime, 127) AS job_planned_start,
     jb.RecipeID                         AS recipe_id,
     jb.PlannedNumberOfBatches           AS planned_number_of_batches,
     jb.PlannedBatchSize                 AS job_planned_batch_size,
-    jb.PlannedBatchSizeUnits            AS planned_batch_size_units,
+    CONVERT(nvarchar(10), jb.PlannedBatchSizeUnits) AS planned_batch_size_units,
     p.Name                              AS product_name,
     p.ProductCode                       AS product_code,
     p.Description                       AS product_description,
@@ -42,9 +41,9 @@ _BATCH_COLUMNS = """
     sh.ID                               AS shift_history_id,
     sh.ShiftID                          AS shift_id,
     sh.TeamID                           AS team_id,
-    sh.StartDateTime                    AS shift_start,
-    sh.EndDateTime                      AS shift_end,
-    sh.Date                             AS shift_date
+    CONVERT(nvarchar(30), sh.StartDateTime, 127) AS shift_start,
+    CONVERT(nvarchar(30), sh.EndDateTime, 127) AS shift_end,
+    CONVERT(nvarchar(10), sh.Date, 127) AS shift_date
 """
 
 _BATCH_JOINS = """
@@ -85,6 +84,7 @@ _MATERIAL_COLUMNS = """
     mua.Quantity                AS consumed_quantity
 """
 
+
 # Query builders
 
 def build_batches_query(limit: int, where_clause: str) -> str:
@@ -95,6 +95,7 @@ def build_batches_query(limit: int, where_clause: str) -> str:
         WHERE {where_clause}
         ORDER BY b.StartDateTime DESC
     """
+
 
 def build_parameters_query(limit: int, where_clause: str) -> str:
     return f"""
@@ -107,6 +108,7 @@ def build_parameters_query(limit: int, where_clause: str) -> str:
         ORDER BY b.StartDateTime DESC, pd.DisplayOrder, bp.ModifiedDateTime DESC
     """
 
+
 def build_materials_query(limit: int, where_clause: str) -> str:
     return f"""
         SELECT TOP {limit}
@@ -118,6 +120,7 @@ def build_materials_query(limit: int, where_clause: str) -> str:
         ORDER BY mua.DateTime DESC
     """
 
+
 # Static detail queries — no dynamic WHERE needed beyond batch_id param
 
 BATCH_INFO = """
@@ -126,16 +129,19 @@ BATCH_INFO = """
         b.Name                          AS batch_name,
         b.JobID                         AS job_id,
         b.State                         AS state,
-        b.StartDateTime                  AS start_datetime,
-        b.EndDateTime                    AS end_datetime,
-        b.PlannedBatchSize               AS planned_batch_size,
-        b.ActualBatchSize                AS actual_batch_size,
-        b.PlannedBatchDurationSeconds    AS planned_duration_seconds,
-        j.Name                           AS job_name,
-        p.Name                           AS product_name,
-        p.ProductCode                    AS product_code,
-        p.Description                    AS product_description,
-        s.Name                           AS system_name
+        CONVERT(nvarchar(30), b.StartDateTime, 127) AS start_datetime,
+        CONVERT(nvarchar(30), b.EndDateTime, 127) AS end_datetime,
+        b.PlannedBatchSize              AS planned_batch_size,
+        b.ActualBatchSize               AS actual_batch_size,
+        b.PlannedBatchDurationSeconds   AS planned_duration_seconds,
+        ISNULL(CONVERT(nvarchar(100), b.[User]), '') AS operator,
+        j.Name                          AS job_name,
+        ISNULL(CONVERT(nvarchar(100), j.ExternalID), '') AS job_external_id,
+        p.Name                          AS product_name,
+        p.ProductCode                   AS product_code,
+        p.Description                   AS product_description,
+        s.Name                          AS system_name,
+        ISNULL(CONVERT(nvarchar(100), s.ExternalID), '') AS system_external_id
     FROM tBatch b
     LEFT JOIN tJob     j ON b.JobID     = j.ID
     LEFT JOIN tProduct p ON j.ProductID = p.ID
@@ -147,8 +153,8 @@ BATCH_STEPS = """
     SELECT
         bs.ID                       AS step_id,
         bs.BatchID                  AS batch_id,
-        bs.StartDateTime            AS step_start,
-        bs.EndDateTime              AS step_end,
+        CONVERT(nvarchar(30), bs.StartDateTime, 127) AS step_start,
+        CONVERT(nvarchar(30), bs.EndDateTime, 127) AS step_end,
         bs.[User]                   AS step_operator,
         fd.Name                     AS step_name,
         fd.Description              AS step_description,
@@ -168,7 +174,7 @@ OPERATOR_REMARKS_BY_BATCH = """
         b.Name                  AS batch_name,
         dbr.[User]              AS operator,
         dbr.RemarkNote          AS remark_text,
-        dbr.datetime            AS recorded_at
+        CONVERT(varchar(50), dbr.datetime, 127) AS recorded_at
     FROM _DBR dbr
     INNER JOIN tBatchStep bs ON dbr.BatchStepID = bs.ID
     INNER JOIN tBatch b      ON bs.BatchID      = b.ID
@@ -196,8 +202,8 @@ COMPLIANCE_TASKS_BY_BATCH = """
         t.Capture02                 AS is_compulsory,
         t.Capture03                 AS is_retentive,
         t.Capture04                 AS requires_analysis,
-        t.CreatedDateTime           AS created_at,
-        t.CompletedDateTime         AS completed_at
+        CONVERT(varchar(50), t.CreatedDateTime, 127) AS created_at,
+        CONVERT(varchar(50), t.CompletedDateTime, 127) AS completed_at
     FROM tTask t
     LEFT JOIN tTaskDefinition td ON t.TaskDefinitionID = td.ID
     WHERE t.BatchID = ?
@@ -237,6 +243,7 @@ def build_quality_deviations_query(limit: int, batch_filter: str) -> str:
         ORDER BY b.StartDateTime DESC, pd.DisplayOrder
     """
 
+
 def build_quality_remarks_query(limit: int, batch_filter: str) -> str:
     return f"""
         SELECT TOP {limit}
@@ -247,7 +254,7 @@ def build_quality_remarks_query(limit: int, batch_filter: str) -> str:
             s.Name                  AS system_name,
             dbr.[User]              AS operator,
             dbr.RemarkNote          AS remark_text,
-            dbr.datetime            AS recorded_at
+            CONVERT(varchar(50), dbr.datetime, 127) AS recorded_at
         FROM _DBR dbr
         INNER JOIN tBatchStep bs ON dbr.BatchStepID = bs.ID
         INNER JOIN tBatch b      ON bs.BatchID      = b.ID
@@ -259,6 +266,7 @@ def build_quality_remarks_query(limit: int, batch_filter: str) -> str:
           AND dbr.culture = 'en-US'
         ORDER BY dbr.datetime DESC
     """
+
 
 def build_quality_incomplete_tasks_query(limit: int, batch_filter: str) -> str:
     return f"""
@@ -275,8 +283,8 @@ def build_quality_incomplete_tasks_query(limit: int, batch_filter: str) -> str:
             t.Capture02             AS is_compulsory,
             t.Capture03             AS is_retentive,
             t.Capture04             AS requires_analysis,
-            t.CreatedDateTime       AS created_at,
-            t.CompletedDateTime     AS completed_at
+            CONVERT(varchar(50), t.CreatedDateTime, 127) AS created_at,
+            CONVERT(varchar(50), t.CompletedDateTime, 127) AS completed_at
         FROM tTask t
         LEFT  JOIN tTaskDefinition td ON t.TaskDefinitionID = td.ID
         INNER JOIN tBatch b           ON t.BatchID          = b.ID
@@ -287,6 +295,7 @@ def build_quality_incomplete_tasks_query(limit: int, batch_filter: str) -> str:
           AND t.PassFail = -1
         ORDER BY t.CreatedDateTime DESC
     """
+
 
 def build_planned_bom_raw_query(include_version: bool = False) -> str:
     version_clause = "AND bom.Version = ?" if include_version else ""

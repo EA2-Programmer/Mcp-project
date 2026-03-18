@@ -81,7 +81,8 @@ class TrakSYSMCPServer:
         self.batch_tools = BatchTools(mcp=self.mcp, time_service=self.time_service, tracing=self.tracing)
         self.batch_tools.register()
 
-        self.performance_tools = PerformanceTools(mcp=self.mcp, time_service=self.time_service, tracing=self.tracing)
+
+        self.performance_tools = PerformanceTools(mcp=self.mcp, tracing=self.tracing)
         self.performance_tools.register()
 
         self.meta_tools = MetaTools(mcp=self.mcp, tracing=self.tracing)
