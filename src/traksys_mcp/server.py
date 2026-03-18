@@ -14,6 +14,7 @@ from src.traksys_mcp.services.langfuse_tracing import TracingService, register_i
 from src.traksys_mcp.tools.batches import BatchTools
 from src.traksys_mcp.tools.performance import PerformanceTools
 from src.traksys_mcp.tools.meta import MetaTools
+from src.traksys_mcp.tools.product import RecipeTools
 from src.traksys_mcp.tools.tasks import TaskTools
 # NEW: Import the Analysis/OEE tools class
 from src.traksys_mcp.tools.Analysis import AnalysisTools
@@ -34,10 +35,10 @@ class TrakSYSMCPServer:
         self.performance_tools: Optional[PerformanceTools] = None
         self.meta_tools: Optional[MetaTools] = None
         self.task_tools: Optional[TaskTools] = None
-        # NEW: Placeholder for OEE tools
         self.oee_tools: Optional[AnalysisTools] = None
-        # NEW: Placeholder for Materials tools (contains get_materials + get_products_using_materials)
         self.materials_tools: Optional[MaterialsTools] = None
+        self.recipe_tools: Optional[RecipeTools] = None
+
 
     def _setup_logging(self) -> None:
         setup_logging()
@@ -80,7 +81,8 @@ class TrakSYSMCPServer:
         self.batch_tools = BatchTools(mcp=self.mcp, time_service=self.time_service, tracing=self.tracing)
         self.batch_tools.register()
 
-        self.performance_tools = PerformanceTools(mcp=self.mcp, time_service=self.time_service, tracing=self.tracing)
+
+        self.performance_tools = PerformanceTools(mcp=self.mcp, tracing=self.tracing)
         self.performance_tools.register()
 
         self.meta_tools = MetaTools(mcp=self.mcp, tracing=self.tracing)
@@ -88,23 +90,21 @@ class TrakSYSMCPServer:
 
         self.task_tools = TaskTools(mcp=self.mcp, time_service=self.time_service, tracing=self.tracing)
         self.task_tools.register()
-        # NEW: Register OEE/Analysis tools
         self.oee_tools = AnalysisTools(
             mcp=self.mcp,
             time_service=self.time_service)
         self.oee_tools.register()
 
-        # NEW: Register materials tools
-        # This single class now registers BOTH tools:
-        #   - get_materials
-        #   - get_products_using_materials
         self.materials_tools = MaterialsTools(
             mcp=self.mcp,
             time_service=self.time_service
         )
         self.materials_tools.register()
 
-        self.logger.info("✓ Tools registered (including both materials tools)")
+        self.recipe_tools = RecipeTools(mcp=self.mcp, tracing=self.tracing)
+        self.recipe_tools.register()
+
+        self.logger.info("Tools registered")
 
     async def run(self) -> None:
         """
@@ -134,8 +134,6 @@ class TrakSYSMCPServer:
                 raise ValueError(f"Unknown transport: {settings.SERVER_TRANSPORT}")
 
         finally:
-            # Flush queued Langfuse events before process exits — background threads
-            # may not finish sending if we exit without this.
             if self.tracing:
                 self.tracing.shutdown()
 

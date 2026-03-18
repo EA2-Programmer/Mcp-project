@@ -23,16 +23,16 @@ _BATCH_COLUMNS = """
     b.SystemID                          AS system_id,
     b.JobID                             AS job_id,
     b.State                             AS state,
-    CONVERT(nvarchar(30), b.StartDateTime, 126) AS start_datetime,
-    CONVERT(nvarchar(30), b.EndDateTime, 126) AS end_datetime,
-    CONVERT(nvarchar(10), b.Date, 126)  AS batch_date,
+    CONVERT(nvarchar(30), b.StartDateTime, 127) AS start_datetime,
+    CONVERT(nvarchar(30), b.EndDateTime, 127) AS end_datetime,
+    CONVERT(nvarchar(10), b.Date, 127)  AS batch_date,
     b.PlannedBatchSize                  AS planned_batch_size,
     b.ActualBatchSize                   AS actual_batch_size,
     b.PlannedBatchDurationSeconds       AS planned_duration_seconds,
     j.Name                              AS job_name,
     ISNULL(CONVERT(nvarchar(100), j.ExternalID), '') AS job_external_id,
     j.Lot                               AS job_lot,
-    CONVERT(nvarchar(30), j.PlannedStartDateTime, 126) AS job_planned_start,
+    CONVERT(nvarchar(30), j.PlannedStartDateTime, 127) AS job_planned_start,
     jb.RecipeID                         AS recipe_id,
     jb.PlannedNumberOfBatches           AS planned_number_of_batches,
     jb.PlannedBatchSize                 AS job_planned_batch_size,
@@ -44,9 +44,9 @@ _BATCH_COLUMNS = """
     sh.ID                               AS shift_history_id,
     sh.ShiftID                          AS shift_id,
     sh.TeamID                           AS team_id,
-    CONVERT(nvarchar(30), sh.StartDateTime, 126) AS shift_start,
-    CONVERT(nvarchar(30), sh.EndDateTime, 126) AS shift_end,
-    CONVERT(nvarchar(10), sh.Date, 126) AS shift_date
+    CONVERT(nvarchar(30), sh.StartDateTime, 127) AS shift_start,
+    CONVERT(nvarchar(30), sh.EndDateTime, 127) AS shift_end,
+    CONVERT(nvarchar(10), sh.Date, 127) AS shift_date
 """
 
 _BATCH_JOINS = """
@@ -132,8 +132,8 @@ BATCH_INFO = """
         b.Name                          AS batch_name,
         b.AltName                       AS batch_alt_name,
         b.State                         AS state,
-        CONVERT(nvarchar(30), b.StartDateTime, 126) AS start_datetime,
-        CONVERT(nvarchar(30), b.EndDateTime, 126) AS end_datetime,
+        CONVERT(nvarchar(30), b.StartDateTime, 127) AS start_datetime,
+        CONVERT(nvarchar(30), b.EndDateTime, 127) AS end_datetime,
         b.PlannedBatchSize              AS planned_batch_size,
         b.ActualBatchSize               AS actual_batch_size,
         b.PlannedBatchDurationSeconds   AS planned_duration_seconds,
@@ -156,8 +156,8 @@ BATCH_STEPS = """
     SELECT
         bs.ID                       AS step_id,
         bs.BatchID                  AS batch_id,
-        CONVERT(nvarchar(30), bs.StartDateTime, 126) AS step_start,
-        CONVERT(nvarchar(30), bs.EndDateTime, 126) AS step_end,
+        CONVERT(nvarchar(30), bs.StartDateTime, 127) AS step_start,
+        CONVERT(nvarchar(30), bs.EndDateTime, 127) AS step_end,
         bs.[User]                   AS step_operator,
         fd.Name                     AS step_name,
         fd.Description              AS step_description,
@@ -177,7 +177,7 @@ OPERATOR_REMARKS_BY_BATCH = """
         b.Name                  AS batch_name,
         dbr.[User]              AS operator,
         dbr.RemarkNote          AS remark_text,
-        dbr.datetime            AS recorded_at
+        CONVERT(varchar(50), dbr.datetime, 127) AS recorded_at
     FROM _DBR dbr
     INNER JOIN tBatchStep bs ON dbr.BatchStepID = bs.ID
     INNER JOIN tBatch b      ON bs.BatchID      = b.ID
@@ -205,8 +205,8 @@ COMPLIANCE_TASKS_BY_BATCH = """
         t.Capture02                 AS is_compulsory,
         t.Capture03                 AS is_retentive,
         t.Capture04                 AS requires_analysis,
-        t.CreatedDateTime           AS created_at,
-        t.CompletedDateTime         AS completed_at
+        CONVERT(varchar(50), t.CreatedDateTime, 127) AS created_at,
+        CONVERT(varchar(50), t.CompletedDateTime, 127) AS completed_at
     FROM tTask t
     LEFT JOIN tTaskDefinition td ON t.TaskDefinitionID = td.ID
     WHERE t.BatchID = ?
@@ -228,8 +228,8 @@ def build_quality_deviations_query(limit: int, batch_filter: str) -> str:
             TRY_CAST(bp.Value AS float) AS value_numeric,
             pd.MinimumValue             AS min_allowed,
             pd.MaximumValue             AS max_allowed,
-            b.StartDateTime             AS batch_start,
-            b.EndDateTime               AS batch_end
+            CONVERT(varchar(50), b.StartDateTime, 127) AS batch_start,
+            CONVERT(varchar(50), b.EndDateTime, 127) AS batch_end
         FROM tBatchParameter bp
         INNER JOIN tBatch b                ON bp.BatchID               = b.ID
         INNER JOIN tParameterDefinition pd ON bp.ParameterDefinitionID = pd.ID
@@ -256,7 +256,7 @@ def build_quality_remarks_query(limit: int, batch_filter: str) -> str:
             s.Name                  AS system_name,
             dbr.[User]              AS operator,
             dbr.RemarkNote          AS remark_text,
-            dbr.datetime            AS recorded_at
+            CONVERT(varchar(50), dbr.datetime, 127) AS recorded_at
         FROM _DBR dbr
         INNER JOIN tBatchStep bs ON dbr.BatchStepID = bs.ID
         INNER JOIN tBatch b      ON bs.BatchID      = b.ID
@@ -284,8 +284,8 @@ def build_quality_incomplete_tasks_query(limit: int, batch_filter: str) -> str:
             t.Capture02             AS is_compulsory,
             t.Capture03             AS is_retentive,
             t.Capture04             AS requires_analysis,
-            t.CreatedDateTime       AS created_at,
-            t.CompletedDateTime     AS completed_at
+            CONVERT(varchar(50), t.CreatedDateTime, 127) AS created_at,
+            CONVERT(varchar(50), t.CompletedDateTime, 127) AS completed_at
         FROM tTask t
         LEFT  JOIN tTaskDefinition td ON t.TaskDefinitionID = td.ID
         INNER JOIN tBatch b           ON t.BatchID          = b.ID

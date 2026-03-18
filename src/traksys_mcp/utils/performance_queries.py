@@ -14,9 +14,9 @@ OEE_METRICS = """
       AND (EndDateTime <= ? OR EndDateTime IS NULL)
 """
 
-# Tag columns and joins are conditional — only added when include_tags=True
 TAG_COLUMNS = """,
-    t_act.Value   AS actual_count,   t_act.Units AS count_units,
+    t_act.Value   AS actual_count,
+    t_act.Units   AS count_units,
     t_prod.Value  AS current_product,
     t_batch.Value AS current_batch,
     t_plan.Value  AS planned_count
@@ -35,18 +35,18 @@ def build_equipment_state_query(limit: int, where_clause: str, include_tags: boo
     tag_joins = TAG_JOINS if include_tags else ""
     return f"""
         SELECT TOP {limit}
-            s.ID          AS system_id,
-            s.Name        AS system_name,
-            s.Description,
+            s.ID                                            AS system_id,
+            NULLIF(CONVERT(nvarchar(100), s.Name), '')      AS system_name,
+            NULLIF(CONVERT(nvarchar(255), s.Description), '') AS description,
             s.AreaID,
-            jsa.JobID     AS current_job_id,
-            jsa.StartDateTime AS session_start,
+            jsa.JobID                                       AS current_job_id,
+            CONVERT(nvarchar(30), jsa.StartDateTime, 126)   AS session_start,
             CASE WHEN jsa.ID IS NOT NULL THEN 'Running' ELSE 'Idle' END AS status
             {tag_columns}
         FROM tSystem s
         LEFT JOIN tJobSystemActual jsa
             ON s.ID = jsa.SystemID
-            AND jsa.EndDateTime IS NULL
+           AND jsa.EndDateTime IS NULL
         {tag_joins}
         WHERE {where_clause}
         ORDER BY s.DisplayOrder

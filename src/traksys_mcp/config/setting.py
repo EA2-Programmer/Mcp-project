@@ -38,7 +38,7 @@ class Settings(BaseSettings):
         default="http://localhost:3000",
         description="Langfuse base URL. Local: http://localhost:3000 | EU: https://cloud.langfuse.com | US: https://us.cloud.langfuse.com"
     )
-    ENABLE_TRACING: bool = Field(default=False, description="Master switch for Langfuse tracing.")
+    ENABLE_TRACING: bool = Field(default=False, description="Master used for Langfuse tracing.")
 
     @field_validator("LOG_LEVEL")
     @classmethod

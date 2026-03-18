@@ -30,6 +30,7 @@ class AnalysisTools:
             description="""Calculate Overall Equipment Effectiveness (OEE) for a line and date range.
 
 **Use when asked about:**
+- OEE Calculation
 - OEE this week vs last week
 - Availability / Performance / Quality breakdown
 - Line performance KPIs

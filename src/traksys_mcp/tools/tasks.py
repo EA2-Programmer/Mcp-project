@@ -126,7 +126,6 @@ class TaskTools:
                             "Check tTask table has data for the requested period",
                         ],
                     )
-                    # When data exists, return the full result dict (not just the list)
                     if result.get("compliance_by_task"):
                         response = ToolResponse.success(data=result)
                     self.tracing.set_output(span, response.model_dump())

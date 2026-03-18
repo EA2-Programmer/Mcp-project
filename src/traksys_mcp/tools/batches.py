@@ -1,3 +1,7 @@
+"""
+Batch-related MCP tools with tracing and time resolution injected.
+"""
+
 import logging
 from typing import TYPE_CHECKING
 
@@ -57,6 +61,14 @@ class BatchTools:
 - "Which batches ran more than 4 hours?"
 - "How many batches completed last week?"
 
+**Also use this tool for FINISHED PRODUCT questions:**
+- "What products do we manufacture?"
+- "What finished products are in the system?"
+- "Which product codes exist?"
+Every batch response includes `product_name` and `product_code` from tProduct.
+To list all products, call this tool with no filters — you will see every product
+that has ever been produced.
+
 **No batch ID required** — omit batch_id and batch_name to query across a time window or line.
 
 **Key Parameters:**
@@ -107,6 +119,7 @@ class BatchTools:
 - "Were there any temperature deviations on line E1 yesterday?"
 - "Show me all parameter deviations in September"
 - "Which parameters were out of spec last month?"
+- "Were filling weight readings within spec for batch 460?"
 
 **No batch ID required** — use time_window to query across a date range without specifying a batch.
 
@@ -114,6 +127,7 @@ class BatchTools:
 - `deviation_only`: True returns only out-of-spec readings
 - `parameter_names`: Filter to specific parameters (e.g., ['Temperature', 'Pressure'])
 - `time_window`: Natural language time (e.g., 'last 7 days')
+- `batch_id`: Target a specific batch directly
 """
         )
         async def get_batch_parameters(params: GetBatchParametersInput) -> dict:
@@ -149,25 +163,25 @@ class BatchTools:
 
         @self.mcp.tool(
             name="get_batch_materials",
-            description="""Retrieve actual material consumption/usage for a batch or date range.
+            description="""Retrieve actual RAW MATERIAL consumption/usage for a batch or date range.
 
 **Use this tool when the user asks about:**
 - "What materials were used in batch AA001?"
 - "How much Sugar was consumed last week?"
 - "Show material usage for job 12345"
-- "What materials were consumed last week across all batches?"
-- "Show me all material usage in September"
+- "Were the right amounts of materials used in batch 462?"
+- "Compare planned vs actual material consumption"
+- "How much of Material 3 did we use this month?"
 
-**No batch ID required** — use time_window to query consumption across a date range.
+**DO NOT use this tool for finished product questions.**
+This tool returns raw material consumption (tMaterialUseActual), not finished products.
+For finished products, use `get_batches`.
 
-**Key Parameters:**
-- `batch_name` or `batch_id`: Identifies the batch — both optional
-- `time_window`: Natural language time (e.g., 'last 7 days')
-- `material_names`: Filter to specific materials (e.g., ['Sugar', 'Water'])
-- `material_codes`: Filter by material codes (e.g., ['MAT-001'])
+**Returns two sections when include_planned_bom=True (default):**
+- `actual_consumption`: What was actually used (tMaterialUseActual)
+- `planned_bom`: What SAP said should be used per operation step (_SAPBOM)
 
-**Note on units:** Quantities are in KGR (Kilogram Reactive — pharmaceutical unit, not standard KG).
-**Note on silos:** Silo source not available yet (SAP integration pending).
+**Note on units:** Actual quantities in KGR, planned quantities in KG — not directly comparable.
 """
         )
         async def get_batch_materials(params: GetBatchMaterialsInput) -> dict:
@@ -210,12 +224,17 @@ class BatchTools:
 - "What steps were executed in batch 42?"
 - "Were all compliance tasks completed for this batch?"
 - "What did operators note during batch AA001?"
+- "Show me the operator remarks for batch 456"
+- "How long did each step take in batch 481?"
 
 **Returns four sections:**
 - `batch_info`: Core batch, job, product, and line data
 - `steps`: Every step executed with start/end times and duration
 - `operator_remarks`: Free-text notes entered by operators during the batch
 - `compliance_tasks`: Mandatory tasks and their pass/fail status
+
+**Requires either batch_id or batch_name — this tool is for single-batch deep-dives only.**
+For multi-batch queries, use get_batches instead.
 """
         )
         async def get_batch_details(params: GetBatchDetailsInput) -> dict:
@@ -257,15 +276,19 @@ class BatchTools:
 Signal 1 — Parameter Deviations:
 Compares every recorded value in tBatchParameter against the min/max
 limits defined in tParameterDefinition. A parameter is flagged as
-deviated if its value falls outside these bounds.
+deviated if its value falls outside these bounds. This catches
+out-of-spec process conditions during the batch.
 
 Signal 2 — Operator Remarks:
 Scans free-text notes recorded by operators in the _DBR table.
 Looks for keywords indicating problems (e.g. 'failed', 'deviation',
-'not checked', 'equipment issue').
+'not checked', 'equipment issue'). This captures human-observed
+issues that may not appear in parameter data.
 
 Signal 3 — Incomplete Mandatory Tasks:
 Checks tTask for compliance steps that were required but not completed.
+A batch with incomplete mandatory tasks may have skipped critical
+quality checks — this is a direct quality risk signal.
 
 **A batch is flagged as problematic if ANY of the three signals triggers.**
 
@@ -275,9 +298,10 @@ Checks tTask for compliance steps that were required but not completed.
 - "Show me all batches with parameter deviations last week"
 - "Which batches had incomplete tasks in September?"
 - "What caused the quality problems on line E1?"
+- "Did batch 468 have any out-of-spec readings?"
 
 **Key Parameters:**
-- `batch_id`: Single batch deep-dive
+- `batch_id`: Single batch deep-dive (ignores time filters when provided)
 - `time_window`: Analyse quality trends over a period (e.g. 'last 30 days')
 - `system_name`: Filter by production line (e.g. 'E1')
 - `limit`: Controls records per signal type independently
@@ -299,7 +323,6 @@ Checks tTask for compliance steps that were required but not completed.
                             "Verify batch_id or batch_name is correct",
                         ],
                     )
-                    # When there are signals but no fallback, success needs the full result
                     if result.get("total_quality_signals", 0) > 0 and not (
                         result.get("time_info") and result["time_info"].get("fallback_triggered")
                     ):
@@ -313,6 +336,6 @@ Checks tTask for compliance steps that were required but not completed.
                         message=str(e),
                         suggestions=[
                             "Check that tBatchParameter, _DBR, and tTask are accessible",
-                            "Verify product_name matches exactly (case-sensitive)",
+                            "Verify product_name matches exactly",
                         ],
                     ).to_dict()

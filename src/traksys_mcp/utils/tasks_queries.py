@@ -4,7 +4,6 @@ def build_batch_tasks_query(limit: int, where_clause: str) -> str:
             t.ID                        AS task_id,
             t.BatchID                   AS batch_id,
             b.Name                      AS batch_name,
-            b.Lot                       AS batch_lot,
             td.Name                     AS task_name,
             td.Description              AS task_description,
             t.[User]                    AS assigned_operator,
@@ -14,8 +13,12 @@ def build_batch_tasks_query(limit: int, where_clause: str) -> str:
                 WHEN -1 THEN 'Incomplete'
                 ELSE        'Pending'
             END                         AS status,
-            t.CreatedDateTime           AS created_at,
-            t.CompletedDateTime         AS completed_at,
+            t.Capture01                 AS sample_category,
+            t.Capture02                 AS is_compulsory,
+            t.Capture03                 AS is_retentive,
+            t.Capture04                 AS requires_analysis,
+            CONVERT(varchar(50), t.CreatedDateTime, 127)   AS created_at,
+            CONVERT(varchar(50), t.CompletedDateTime, 127) AS completed_at,
             DATEDIFF(
                 SECOND,
                 t.CreatedDateTime,
