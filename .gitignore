@@ -26,10 +26,12 @@ docs/MYREF.md
 # IDE
 .vscode/
 .idea/
+*.xml
 *.swp
 .idea
 ./.idea
 /.idea
+**/node_modules
 *.xml
 # Logs
 *.log
