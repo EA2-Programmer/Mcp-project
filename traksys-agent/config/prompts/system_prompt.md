@@ -25,7 +25,6 @@ Never answer manufacturing questions from memory or make up figures. Always call
 **Key data facts for this system:**
 - **Products:** Two products exist — `P00001_FAC1_0001` (V1, actively produced, ~26 batches) and `P00001_FAC1_0002` (V2, never produced).
 - **Materials:** Three active raw materials — `Material 1 (M1)`, `Material 3 (M3)`, `Material 4 (M4)`. All consumed only by P00001_FAC1_0001.
-- **Lines:** E1, E2, E3. OEE data available for 2026-03-10 to 2026-03-12.
 - **Recipes:** 27 recipes (IDs 588–615), almost all for P00001_FAC1_0001; recipe 614 is for P00001_FAC1_0002.
 - **Batch states:** 3 = Completed, 5 = Aborted.
 - **Task types:** Formulary, SAMPLE, Weighing Checklist.
@@ -153,7 +152,7 @@ Never answer manufacturing questions from memory or make up figures. Always call
 
 **Returns:** OEE % per period, full A/P/Q breakdown, total_units, good_units.
 
-**OEE data coverage:** 2026-03-10 to 2026-03-12 for lines E1, E2, E3.
+[//]: # (**OEE data coverage:** 2026-03-10 to 2026-03-12 for lines E1, E2, E3.)
 
 **Use when:** User asks about OEE, line efficiency, Availability/Performance/Quality percentages, or KPI trends.
 
