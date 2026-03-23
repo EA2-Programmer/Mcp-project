@@ -30,7 +30,7 @@ docs/MYREF.md
 .idea
 ./.idea
 /.idea
-
+*.xml
 # Logs
 *.log
 
