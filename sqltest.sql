@@ -1,4 +1,4 @@
-USE [EBR_Template]
+    USE [EBR_Template]
 GO
 
 INSERT INTO [dbo].[tOeeCalculation] (
