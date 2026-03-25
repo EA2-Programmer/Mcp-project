@@ -1,24 +1,66 @@
 # ══════════════════════════════════════════════════════════════════════════════
-#  TrakSYS AI Stack — docker-compose.yml
-#
-#  Services
-#  ────────
-#  open-webui   Chat interface          → http://localhost:3001
-#  pipelines    OpenWebUI plugin host   → http://localhost:9099  (internal)
-#  traksys-mcp  Your MCP server + mcpo  → http://localhost:8000
-#
-#  External services (already running, NOT managed here)
-#  ──────────────────────────────────────────────────────
-#  Langfuse     http://localhost:3000   (langfuse_default network)
-#  SQL Server   host.docker.internal:1433  (Windows host)
-#
-#  Networks
-#  ────────
-#  ai-stack        internal bridge — all three services above
-#  langfuse_default external — lets traksys-mcp reach Langfuse directly
+#  TrakSYS AI Stack — Updated docker-compose.yml
 # ══════════════════════════════════════════════════════════════════════════════
 
 services:
+  # ── Static Dashboard Server (Working) ──────────────────────────────────────
+  static-assets:
+    image: python:3.11-slim
+    container_name: static-assets
+    restart: unless-stopped
+    working_dir: /app
+    volumes:
+      - ./tests:/app
+    ports:
+      - "5500:5500"
+    command: python -m http.server 5500
+    networks:
+      - ai-stack
+
+  # ── TrakSYS MCP Server (mcpo OpenAPI Proxy) ───────────────────────────
+# ── TrakSYS Custom Agent (FastAPI + MCP Subprocess) ──────────────────────
+  traksys-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: traksys-agent
+    restart: unless-stopped
+    # CRITICAL: We run your custom agent API, which spawns the MCP server internally
+    command: ["python", "traksys-agent/main.py"]
+    develop:
+      watch:
+        - action: sync
+          path: ./src
+          target: /app/src
+        - action: sync
+          path: ./traksys-agent
+          target: /app/traksys-agent
+    ports:
+      - "8000:8000"
+    environment:
+      - MSSQL_CONNECTION_STRING=Driver={ODBC Driver 17 for SQL Server};Server=host.docker.internal,1433;Database=EBR_Template;Trusted_Connection=no;UID=${MSSQL_USER:-sa};PWD=${MSSQL_PASSWORD:-}
+      - PYTHONPATH=/app
+
+      # Keys needed by your Agent (main.py)
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - CLAUDE_MODEL=${CLAUDE_MODEL:-claude-haiku-4-5}
+
+      # Transport must be stdio because main.py communicates with MCP via stdio
+      - SERVER_TRANSPORT=stdio
+      - LOG_LEVEL=INFO
+      - LOG_FORMAT=json
+
+      - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY}
+      - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY}
+      - LANGFUSE_BASE_URL=http://langfuse-langfuse-web-1:3000
+      - ENABLE_TRACING=true
+
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - ai-stack
+      - langfuse_default
 
   # ── OpenWebUI ──────────────────────────────────────────────────────────────
   open-webui:
@@ -26,30 +68,20 @@ services:
     container_name: open-webui
     restart: unless-stopped
     ports:
-      - "3001:8080"           # Use 3001 on host — Langfuse already owns 3000
+      - "3001:8080"
     volumes:
       - open-webui-data:/app/backend/data
     environment:
-      # ── LLM API connections (same as your current manual setup) ──
-      - OPENAI_API_BASE_URL=https://api.openai.com/v1
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-      # Anthropic via OpenAI-compatible shim already configured in UI
-      # ── Pipelines connection ──────────────────────────────────────
-      # After first boot: Admin Panel > Settings > Connections
-      # Add OpenAI-compatible connection: http://pipelines:9099 / key: 0p3n-w3bu!
-      # (Can't be set via env var — must be done in UI)
-      # ── Security ─────────────────────────────────────────────────
-      - WEBUI_SECRET_KEY=${WEBUI_SECRET_KEY:-changeme-set-in-env}
-      # ── Allow host access (for MCPO tool registration) ────────────
+      - WEBUI_SECRET_KEY=${WEBUI_SECRET_KEY:-changeme}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:
       - ai-stack
     depends_on:
-      - pipelines
-      - traksys-mcp
+      - traksys-agent
 
-  # ── Pipelines (OpenWebUI plugin host — runs Langfuse filter) ─────────────
+  # ── Pipelines (OpenWebUI plugin host) ────────────────────────────────────
   pipelines:
     image: ghcr.io/open-webui/pipelines:main
     container_name: pipelines
@@ -64,62 +96,16 @@ services:
       - "host.docker.internal:host-gateway"
     networks:
       - ai-stack
-      - langfuse_default   # needs to reach Langfuse to send traces
+      - langfuse_default
+    depends_on:
+      - traksys-agent
 
-  # ── TrakSYS MCP Server (your code + mcpo proxy) ───────────────────────────
-  traksys-mcp:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: traksys-mcp
-    restart: unless-stopped
-    ports:
-      - "8000:8000"
-    environment:
-      # ── Database ─────────────────────────────────────────────────
-      # host.docker.internal resolves to your Windows host from inside Docker
-      - MSSQL_CONNECTION_STRING=Driver={ODBC Driver 17 for SQL Server};Server=host.docker.internal,1433;Database=EBR_Template;Trusted_Connection=no;UID=${MSSQL_USER:-sa};PWD=${MSSQL_PASSWORD:-}
-
-      # ── LLM ──────────────────────────────────────────────────────
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-      - CLAUDE_MODEL=${CLAUDE_MODEL:-claude-haiku-4-5}
-
-      # ── Server config ─────────────────────────────────────────────
-      - READ_ONLY=${READ_ONLY:-true}
-      - ENABLE_WRITES=${ENABLE_WRITES:-false}
-      - LOG_LEVEL=${LOG_LEVEL:-INFO}
-      - LOG_FORMAT=${LOG_FORMAT:-json}
-      - MSSQL_CONNECTION_TIMEOUT=${MSSQL_CONNECTION_TIMEOUT:-5}
-      - MSSQL_QUERY_TIMEOUT=${MSSQL_QUERY_TIMEOUT:-30}
-      - MAX_ROWS=${MAX_ROWS:-1000}
-      - MAX_QUERY_LENGTH=${MAX_QUERY_LENGTH:-8000}
-      - SERVER_TRANSPORT=stdio
-      - HTTP_BIND_HOST=0.0.0.0
-      - HTTP_BIND_PORT=8000
-
-      # ── Langfuse tracing ──────────────────────────────────────────
-      # Reaches Langfuse container directly via shared langfuse_default network
-      - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY}
-      - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY}
-      - LANGFUSE_BASE_URL=http://langfuse-langfuse-web-1:3000
-      - ENABLE_TRACING=${ENABLE_TRACING:-true}
-
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    networks:
-      - ai-stack
-      - langfuse_default   # reach Langfuse directly
-
-# ── Volumes ───────────────────────────────────────────────────────────────────
-volumes:
-  open-webui-data:
-  pipelines-data:
-
-# ── Networks ──────────────────────────────────────────────────────────────────
 networks:
   ai-stack:
     driver: bridge
-
-  # Join the existing Langfuse network — don't recreate it
   langfuse_default:
     external: true
+
+volumes:
+  open-webui-data:
+  pipelines-data:

@@ -29,6 +29,7 @@ WORKDIR /app
 # ── Copy project files ──────────────────────────────────────────────────────
 COPY requirements.txt pyproject.toml ./
 COPY src/ ./src/
+COPY traksys-agent/ ./traksys-agent/
 
 # ── Install dependencies + the package itself ───────────────────────────────
 # pip install -e . reads pyproject.toml which has:

@@ -29,19 +29,19 @@ async def list_models():
 @router.post("/chat/completions", response_model=ChatCompletionResponse)
 async def chat_completions(request: ChatCompletionRequest, orch: AgentOrchestrator = Depends(get_orchestrator)):
     """OpenAI-compatible chat completions endpoint."""
-    
+
     logger.info(f"Received chat request for model: {request.model}")
-    
+
     # Convert incoming messages to dict format for the orchestrator
     messages = [m.model_dump(exclude_none=True) for m in request.messages]
-    
+
     try:
         # Generate response using the orchestrator
         # Note: Current orchestrator is a generator, so we collect the final result
         full_response = ""
         async for chunk in orch.chat(messages):
             full_response += chunk
-            
+
         # Format as OpenAI response
         return ChatCompletionResponse(
             id=f"chatcmpl-{uuid.uuid4()}",
@@ -54,7 +54,7 @@ async def chat_completions(request: ChatCompletionRequest, orch: AgentOrchestrat
                 )
             ]
         )
-        
+
     except Exception as e:
         logger.error(f"Error in chat_completions: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))

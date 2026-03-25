@@ -1,12 +1,13 @@
-from traksys_mcp.core.exceptions import (
-    TrakSYSError, DatabaseError, DatabaseConnectionError,
-    QueryTimeoutError, SecurityError, ValidationError
-)
-from traksys_mcp.config.setting import settings
-from traksys_mcp.core.utils import serialize_value, serialize_row, rows_to_dicts
+"""
+TrakSYS MCP Server - Main Package
+"""
+
+# Import only base exceptions to avoid circular dependencies with services
+from .core.exceptions import TrakSYSError, DatabaseError
+
+__version__ = "0.1.0"
 
 __all__ = [
-    "TrakSYSError", "DatabaseError", "DatabaseConnectionError",
-    "QueryTimeoutError", "SecurityError", "ValidationError",
-    "settings", "serialize_value", "serialize_row", "rows_to_dicts"
+    "TrakSYSError",
+    "DatabaseError",
 ]

@@ -1,5 +1,10 @@
+import sys
+from pathlib import Path
+
+project_root = Path(__file__).parent.parent
+sys.path.insert(0, str(project_root))
+
 import logging
-import asyncio
 import time
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
@@ -15,6 +20,7 @@ from agent.orchestrator import AgentOrchestrator
 from api import routes
 
 # Setup basic logging for the agent
+
 logging.basicConfig(level=settings.log_level)
 logger = logging.getLogger(__name__)
 

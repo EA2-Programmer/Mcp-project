@@ -16,9 +16,7 @@ from src.traksys_mcp.tools.performance import PerformanceTools
 from src.traksys_mcp.tools.meta import MetaTools
 from src.traksys_mcp.tools.product import RecipeTools
 from src.traksys_mcp.tools.tasks import TaskTools
-# NEW: Import the Analysis/OEE tools class
 from src.traksys_mcp.tools.Analysis import AnalysisTools
-# NEW: Import the Materials tools class (now registers BOTH tools)
 from src.traksys_mcp.tools.materials import MaterialsTools
 
 
@@ -39,7 +37,6 @@ class TrakSYSMCPServer:
         self.materials_tools: Optional[MaterialsTools] = None
         self.recipe_tools: Optional[RecipeTools] = None
 
-
     def _setup_logging(self) -> None:
         setup_logging()
         self.logger.info("=" * 60)
@@ -47,13 +44,7 @@ class TrakSYSMCPServer:
         self.logger.info("=" * 60)
 
     async def initialize(self) -> None:
-        """
-        Async service initialization. Order matters:
-            1. TracingService  — no deps; must be first so the DB health check can be traced
-            2. Database check  — verifies connectivity before anything queries the DB
-            3. DataCache       — queries DB for available date ranges
-            4. TimeService     — depends on cache
-        """
+        """Async service initialization."""
         self.logger.info("Initializing TrakSYS services...")
 
         self.tracing = TracingService()
@@ -66,21 +57,29 @@ class TrakSYSMCPServer:
             )
         self.logger.info("✓ Database connection verified")
 
+        # === Key fix: background cache refresh so startup is fast ===
         self.data_cache = DataAvailabilityCache()
-        await self.data_cache.refresh_all()
-        self.logger.info("✓ Data cache ready")
+        asyncio.create_task(self._refresh_cache_background())
 
         self.time_service = TimeResolutionService(self.data_cache)
-        self.logger.info("✓ Time resolution service ready")
+        self.logger.info("✓ Time resolution service ready (cache refresh started in background)")
 
-        self.logger.info("All services initialized successfully")
+        self.logger.info("All core services initialized successfully")
+
+    async def _refresh_cache_background(self) -> None:
+        """Refresh date cache without blocking MCP handshake."""
+        try:
+            self.logger.info("Starting background cache refresh...")
+            await self.data_cache.refresh_all()
+            self.logger.info("✓ Background cache refresh completed")
+        except Exception as e:
+            self.logger.error("Background cache refresh failed: %s", e)
 
     def register_tools(self) -> None:
         self.mcp = FastMCP("TrakSYS Manufacturing Analytics")
 
         self.batch_tools = BatchTools(mcp=self.mcp, time_service=self.time_service, tracing=self.tracing)
         self.batch_tools.register()
-
 
         self.performance_tools = PerformanceTools(mcp=self.mcp, tracing=self.tracing)
         self.performance_tools.register()
@@ -90,15 +89,11 @@ class TrakSYSMCPServer:
 
         self.task_tools = TaskTools(mcp=self.mcp, time_service=self.time_service, tracing=self.tracing)
         self.task_tools.register()
-        self.oee_tools = AnalysisTools(
-            mcp=self.mcp,
-            time_service=self.time_service)
+
+        self.oee_tools = AnalysisTools(mcp=self.mcp, time_service=self.time_service)
         self.oee_tools.register()
 
-        self.materials_tools = MaterialsTools(
-            mcp=self.mcp,
-            time_service=self.time_service
-        )
+        self.materials_tools = MaterialsTools(mcp=self.mcp, time_service=self.time_service)
         self.materials_tools.register()
 
         self.recipe_tools = RecipeTools(mcp=self.mcp, tracing=self.tracing)
@@ -107,15 +102,9 @@ class TrakSYSMCPServer:
         self.logger.info("Tools registered")
 
     async def run(self) -> None:
-        """
-        Run the MCP server.
-        """
         self._setup_logging()
         try:
-            # Initialize services
             await self.initialize()
-
-            # Register tools
             self.register_tools()
 
             self.logger.info("=" * 60)
