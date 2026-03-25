@@ -1,10 +1,11 @@
 import json
 import logging
 import asyncio
+import uuid
 from typing import AsyncGenerator, List, Dict, Any
 from .openai_client import OpenAIClient
 from .function_registry import FunctionRegistry
-from mcp.client import MCPClient
+from ..mcp.client import MCPClient
 
 
 class AgentOrchestrator:
@@ -28,6 +29,7 @@ class AgentOrchestrator:
 
         full_messages = [{"role": "system", "content": self.system_prompt}] + messages
         tools = await self.registry.get_openai_tools()
+        trace_name = f"TrakSYS-Query-{uuid.uuid4().hex[:6]}"
         max_iterations = 10
         iteration = 0
 

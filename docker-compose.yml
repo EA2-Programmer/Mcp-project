@@ -17,45 +17,37 @@ services:
     networks:
       - ai-stack
 
-  # ── TrakSYS MCP Server (mcpo OpenAPI Proxy) ───────────────────────────
-# ── TrakSYS Custom Agent (FastAPI + MCP Subprocess) ──────────────────────
+  # ── TrakSYS Custom Agent (FastAPI + MCP Subprocess) ──────────────────────
   traksys-agent:
     build:
       context: .
       dockerfile: Dockerfile
     container_name: traksys-agent
     restart: unless-stopped
-    # CRITICAL: We run your custom agent API, which spawns the MCP server internally
-    command: ["python", "traksys-agent/main.py"]
+    command: ["python", "-m", "traksys_agent.main"]
     develop:
       watch:
         - action: sync
           path: ./src
           target: /app/src
         - action: sync
-          path: ./traksys-agent
-          target: /app/traksys-agent
+          path: ./traksys_agent               # changed from traksys-agent
+          target: /app/traksys_agent
     ports:
       - "8000:8000"
     environment:
       - MSSQL_CONNECTION_STRING=Driver={ODBC Driver 17 for SQL Server};Server=host.docker.internal,1433;Database=EBR_Template;Trusted_Connection=no;UID=${MSSQL_USER:-sa};PWD=${MSSQL_PASSWORD:-}
       - PYTHONPATH=/app
-
-      # Keys needed by your Agent (main.py)
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - CLAUDE_MODEL=${CLAUDE_MODEL:-claude-haiku-4-5}
-
-      # Transport must be stdio because main.py communicates with MCP via stdio
       - SERVER_TRANSPORT=stdio
       - LOG_LEVEL=INFO
       - LOG_FORMAT=json
-
       - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY}
       - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY}
       - LANGFUSE_BASE_URL=http://langfuse-langfuse-web-1:3000
       - ENABLE_TRACING=true
-
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:

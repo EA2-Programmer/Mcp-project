@@ -93,7 +93,7 @@ class TrakSYSMCPServer:
         self.oee_tools = AnalysisTools(mcp=self.mcp, time_service=self.time_service)
         self.oee_tools.register()
 
-        self.materials_tools = MaterialsTools(mcp=self.mcp, time_service=self.time_service)
+        self.materials_tools = MaterialsTools(mcp=self.mcp, time_service=self.time_service, tracing=self.tracing)
         self.materials_tools.register()
 
         self.recipe_tools = RecipeTools(mcp=self.mcp, tracing=self.tracing)

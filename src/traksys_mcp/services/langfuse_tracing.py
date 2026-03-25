@@ -1,7 +1,6 @@
 """
 Langfuse tracing service for TrakSYS MCP tools.
-
-Updated for Langfuse v3: Uses OpenTelemetry context managers instead of manual trace objects.
+Updated for Langfuse v3.
 """
 
 import logging
@@ -9,10 +8,8 @@ import time
 from contextlib import asynccontextmanager, contextmanager
 from typing import Any, Generator, AsyncGenerator, Optional
 
-# NEW: Import propagate_attributes for v3 trace tagging
 from langfuse import Langfuse, propagate_attributes
 
-# Use relative import to avoid circular dependencies
 from ..config.setting import settings
 
 logger = logging.getLogger(__name__)
@@ -46,7 +43,6 @@ class OtelSpanWrapper:
     """
     def __init__(self, context_manager: Any):
         self.context_manager = context_manager
-        # Manual entry into the context manager to start the span
         self.span = self.context_manager.__enter__()
 
     def update(self, **kwargs):
@@ -54,14 +50,12 @@ class OtelSpanWrapper:
             self.span.update(**kwargs)
 
     def end(self):
-        # Manual exit from the context manager to end the span
         try:
             self.context_manager.__exit__(None, None, None)
         except Exception as e:
             logger.debug("Error ending Otel span: %s", e)
 
     def __getattr__(self, name):
-        # Delegate other attributes to the underlying span object (e.g., .id)
         return getattr(self.span, name)
 
 
@@ -73,7 +67,6 @@ class SpanWrapper:
     """
 
     def __init__(self, span: Any, root_span: Any, client: Optional[Langfuse] = None):
-        # Rename attribute to avoid shadowing the .span() method!
         self._span = span
         self.root_span = root_span
         self.client = client
@@ -85,19 +78,15 @@ class SpanWrapper:
             self.root_span.update(**kwargs)
 
     def end(self):
-        # If it's an OtelSpanWrapper or stateful client, it might have .end()
         if hasattr(self._span, 'end'):
             self._span.end()
 
     def span(self, **kwargs) -> Any:
         """Creates a child span."""
-        # Check if the underlying span has a .span method (not just the attribute)
-        # In V3, LangfuseSpan often has a .span() method.
         if hasattr(self._span, 'span') and callable(self._span.span):
             return self._span.span(**kwargs)
 
         if self.client:
-            # Fallback to high-level API with manual parent linking if method is missing
             parent_id = getattr(self._span, "id", None)
             ctx = self.client.start_as_current_observation(
                 as_type="span",
@@ -109,14 +98,15 @@ class SpanWrapper:
         return self._span
 
     def event(self, **kwargs) -> Any:
-        """Creates a child event."""
+        """Creates a child event using the event method on the span."""
         if hasattr(self._span, 'event') and callable(self._span.event):
             return self._span.event(**kwargs)
 
         if self.client:
             parent_id = getattr(self._span, "id", None)
             ctx = self.client.start_as_current_observation(
-                as_type="event",
+                as_type="span",
+                name="event",
                 trace_context={"parent_observation_id": parent_id} if parent_id else None,
                 **kwargs
             )
@@ -141,7 +131,6 @@ class SpanWrapper:
         return self._span
 
     def __getattr__(self, name):
-        # Delegate other attributes (like .id) to the underlying span
         return getattr(self._span, name)
 
 
@@ -159,7 +148,7 @@ class TracingService:
                 self._client = Langfuse(
                     secret_key=secret_key,
                     public_key=settings.LANGFUSE_PUBLIC_KEY,
-                    host=settings.LANGFUSE_BASE_URL,  # V3 CHANGE: 'base_url' is now passed as 'host'
+                    host=settings.LANGFUSE_BASE_URL,
                 )
                 if not self._client.auth_check():
                     logger.error("Langfuse auth failed. Tracing disabled.")
@@ -179,14 +168,14 @@ class TracingService:
 
         yielded = False
         try:
-            # Create a top-level observation for the chat session
+            # Create a root span that will be the trace
             with self._client.start_as_current_observation(
-                    name="agent_chat_session",
-                    as_type="span",
-                    input={"args": args, "kwargs": kwargs}
+                as_type="span",
+                name="agent_chat_session",
+                input={"args": args, "kwargs": kwargs}
             ) as root_span:
+                # The chat session itself is the root span; we don't need a separate child.
                 yielded = True
-                # We yield a wrapper around the root span.
                 yield SpanWrapper(root_span, root_span, self._client)
         except Exception as e:
             if not yielded:
@@ -200,7 +189,7 @@ class TracingService:
 
     @asynccontextmanager
     async def trace_tool(
-            self, tool_name: str, inputs: dict
+        self, tool_name: str, inputs: dict
     ) -> AsyncGenerator[Any, None]:
         if not self.enabled or not self._client:
             yield _NOOP
@@ -208,27 +197,18 @@ class TracingService:
 
         yielded = False
         try:
-            # V3 CHANGE 1: The first observation automatically becomes the "Trace"
+            # Create a root span that will be the trace
             with self._client.start_as_current_observation(
-                    as_type="span",
-                    name=f"mcp_tool/{tool_name}",
-                    input=inputs
+                as_type="span",
+                name=f"tools/call_{tool_name}",
+                input=inputs
             ) as root_span:
-
-                # V3 CHANGE 2: Tags and trace metadata must be set via propagate_attributes
-                with propagate_attributes(tags=["mcp", f"tool:{tool_name}"]):
-                    # V3 CHANGE 3: The nested 'with' block automatically becomes a child Span
-                    with self._client.start_as_current_observation(
-                            as_type="span",
-                            name=tool_name,
-                            input=inputs
-                    ) as child_span:
-                        yielded = True
-                        yield SpanWrapper(child_span, root_span, self._client)
-
+                # The tool execution is the root span; no separate child needed.
+                yielded = True
+                yield SpanWrapper(root_span, root_span, self._client)
         except Exception as e:
             if not yielded:
-                logger.error("Trace setup failed: %s", e)
+                logger.error("Trace tool failed: %s", e)
                 yield _NOOP
             else:
                 raise
@@ -245,7 +225,6 @@ class TracingService:
         parent_id = getattr(parent_observation, "id", None)
 
         try:
-            # Use high-level API with trace_context for parent linking
             ctx = self._client.start_as_current_observation(
                 name=f"llm-generation-turn-{turn}",
                 as_type="generation",
@@ -264,25 +243,31 @@ class TracingService:
             return
 
         target = trace.root_span if hasattr(trace, 'root_span') else trace
-        parent_id = getattr(target, "id", None)
 
-        try:
-            # Use high-level API for consistency
-            with self._client.start_as_current_observation(
+        if hasattr(target, 'event') and callable(target.event):
+            target.event(
                 name="error",
-                as_type="event",
                 level="ERROR",
                 status_message=str(error),
-                input={"context": context, "error_type": type(error).__name__},
-                trace_context={"parent_observation_id": parent_id} if parent_id else None
-            ):
-                pass
+                input={"context": context, "error_type": type(error).__name__}
+            )
+        else:
+            parent_id = getattr(target, "id", None)
+            try:
+                with self._client.start_as_current_observation(
+                    as_type="span",
+                    name="error",
+                    level="ERROR",
+                    status_message=str(error),
+                    input={"context": context, "error_type": type(error).__name__},
+                    trace_context={"parent_observation_id": parent_id} if parent_id else None
+                ):
+                    pass
+            except Exception as e:
+                logger.error("Failed to record error trace: %s", e)
 
-            # Also update the parent status
-            if hasattr(target, "update"):
-                target.update(level="ERROR", status_message=str(error))
-        except Exception as e:
-            logger.error("Failed to record error trace: %s", e)
+        if hasattr(target, "update"):
+            target.update(level="ERROR", status_message=str(error))
 
     def set_trace_output(self, trace: Any, output: Any) -> None:
         """Updates the trace with final output data."""
@@ -309,13 +294,13 @@ class TracingService:
         yielded = False
         try:
             with self._client.start_as_current_observation(
-                    as_type="span",
-                    name=span_name,
-                    input={"args": [str(a) for a in args], "kwargs": str(kwargs)}
+                as_type="span",
+                name=span_name,
+                input={"args": [str(a) for a in args], "kwargs": str(kwargs)}
             ) as root_span:
                 with self._client.start_as_current_observation(
-                        as_type="span",
-                        name="query_execution",
+                    as_type="span",
+                    name="query_execution",
                 ) as child_span:
                     yielded = True
                     yield child_span

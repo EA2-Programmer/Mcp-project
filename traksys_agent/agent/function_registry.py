@@ -1,5 +1,5 @@
 from typing import List, Dict, Any
-from mcp.client import MCPClient
+from ..mcp.client import MCPClient
 
 
 class FunctionRegistry:
