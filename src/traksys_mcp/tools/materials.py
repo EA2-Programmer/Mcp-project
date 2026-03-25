@@ -11,12 +11,14 @@ from src.traksys_mcp.services import materials
 if TYPE_CHECKING:
     from fastmcp import FastMCP
     from src.traksys_mcp.services.time_resolution import TimeResolutionService
+    from src.traksys_mcp.services.langfuse_tracing import TracingService
 
 
 class MaterialsTools:
-    def __init__(self, mcp: "FastMCP", time_service: "TimeResolutionService"):
+    def __init__(self, mcp: "FastMCP", time_service: "TimeResolutionService", tracing: "TracingService"):
         self.mcp = mcp
         self.time_service = time_service
+        self.tracing = tracing
         self.logger = logging.getLogger(__name__)
 
     def register(self) -> None:
@@ -57,36 +59,50 @@ response includes product_name and product_code from tProduct.
                 end_date: str | None = None,
                 limit: int = 50,
         ) -> dict:
-            try:
-                result = await materials.get_materials(
-                    material_id=material_id, material_name=material_name,
-                    material_code=material_code, material_type_id=material_type_id,
-                    material_group_id=material_group_id, time_window=time_window,
-                    start_date=start_date, end_date=end_date,
-                    limit=limit, time_service=self.time_service
-                )
-                data = result["materials"]
-                if not data:
-                    return ToolResponse.no_data(
-                        suggestions=[
-                            "No materials found matching the filter",
-                            "Try removing material_name or material_code filters",
-                            "Check tMaterial table is populated",
-                        ],
-                        time_info=result.get("time_info")
-                    ).to_dict()
+            inputs = {
+                "material_id": material_id, "material_name": material_name,
+                "material_code": material_code, "material_type_id": material_type_id,
+                "material_group_id": material_group_id, "time_window": time_window,
+                "start_date": start_date, "end_date": end_date, "limit": limit
+            }
+            async with self.tracing.trace_tool("get_materials", inputs) as span:
+                try:
+                    result = await materials.get_materials(
+                        material_id=material_id, material_name=material_name,
+                        material_code=material_code, material_type_id=material_type_id,
+                        material_group_id=material_group_id, time_window=time_window,
+                        start_date=start_date, end_date=end_date,
+                        limit=limit, time_service=self.time_service
+                    )
+                    data = result["materials"]
+                    if not data:
+                        response = ToolResponse.no_data(
+                            suggestions=[
+                                "No materials found matching the filter",
+                                "Try removing material_name or material_code filters",
+                                "Check tMaterial table is populated",
+                            ],
+                            time_info=result.get("time_info")
+                        )
+                        self.tracing.set_output(span, response.to_dict())
+                        return response.to_dict()
 
-                return ToolResponse.success(
-                    data={
-                        "materials": data,
-                        "tables_used": result.get("tables_used"),
-                        "logic": result.get("logic")
-                    },
-                    time_info=result.get("time_info")
-                ).to_dict()
-            except Exception as e:
-                self.logger.error("get_materials error", exc_info=True)
-                return ToolResponse.error(message=str(e)).to_dict()
+                    response = ToolResponse.success(
+                        data={
+                            "materials": data,
+                            "tables_used": result.get("tables_used"),
+                            "logic": result.get("logic")
+                        },
+                        time_info=result.get("time_info")
+                    )
+                    self.tracing.set_output(span, response.to_dict())
+                    return response.to_dict()
+                except Exception as e:
+                    self.tracing.record_error(span, e, "get_materials")
+                    self.logger.error("get_materials error", exc_info=True)
+                    response = ToolResponse.error(message=str(e))
+                    self.tracing.set_output(span, response.to_dict())
+                    return response.to_dict()
 
     def _register_get_products_using_materials(self) -> None:
         @self.mcp.tool(
@@ -121,32 +137,45 @@ This tool shows which finished products (tProduct) consumed those raw materials.
                 end_date: str | None = None,
                 limit: int = 100,
         ) -> dict:
-            try:
-                result = await materials.get_products_using_materials(
-                    material_id=material_id, material_name=material_name,
-                    material_code=material_code, time_window=time_window,
-                    start_date=start_date, end_date=end_date,
-                    limit=limit, time_service=self.time_service
-                )
-                data = result["products"]
-                if not data:
-                    return ToolResponse.no_data(
-                        suggestions=[
-                            "No consumption recorded yet for this material",
-                            "Check tMaterialUseActual table has records",
-                            "Try without material filter to see all product-material links",
-                        ],
-                        time_info=result.get("time_info")
-                    ).to_dict()
+            inputs = {
+                "material_id": material_id, "material_name": material_name,
+                "material_code": material_code, "time_window": time_window,
+                "start_date": start_date, "end_date": end_date, "limit": limit
+            }
+            async with self.tracing.trace_tool("get_products_using_materials", inputs) as span:
+                try:
+                    result = await materials.get_products_using_materials(
+                        material_id=material_id, material_name=material_name,
+                        material_code=material_code, time_window=time_window,
+                        start_date=start_date, end_date=end_date,
+                        limit=limit, time_service=self.time_service
+                    )
+                    data = result["products"]
+                    if not data:
+                        response = ToolResponse.no_data(
+                            suggestions=[
+                                "No consumption recorded yet for this material",
+                                "Check tMaterialUseActual table has records",
+                                "Try without material filter to see all product-material links",
+                            ],
+                            time_info=result.get("time_info")
+                        )
+                        self.tracing.set_output(span, response.to_dict())
+                        return response.to_dict()
 
-                return ToolResponse.success(
-                    data={
-                        "products": data,
-                        "tables_used": result.get("tables_used"),
-                        "logic": result.get("logic")
-                    },
-                    time_info=result.get("time_info")
-                ).to_dict()
-            except Exception as e:
-                self.logger.error("get_products_using_materials error", exc_info=True)
-                return ToolResponse.error(message=str(e)).to_dict()
+                    response = ToolResponse.success(
+                        data={
+                            "products": data,
+                            "tables_used": result.get("tables_used"),
+                            "logic": result.get("logic")
+                        },
+                        time_info=result.get("time_info")
+                    )
+                    self.tracing.set_output(span, response.to_dict())
+                    return response.to_dict()
+                except Exception as e:
+                    self.tracing.record_error(span, e, "get_products_using_materials")
+                    self.logger.error("get_products_using_materials error", exc_info=True)
+                    response = ToolResponse.error(message=str(e))
+                    self.tracing.set_output(span, response.to_dict())
+                    return response.to_dict()

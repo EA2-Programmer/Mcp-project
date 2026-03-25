@@ -1,6 +1,6 @@
 from openai import AsyncOpenAI
 import logging
-from config.settings import settings
+from ..config.settings import settings
 
 
 class OpenAIClient:

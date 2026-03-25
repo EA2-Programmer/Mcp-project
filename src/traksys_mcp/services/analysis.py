@@ -184,7 +184,7 @@ async def get_oee_downtime_events(
         INNER JOIN tEventDefinition ed ON e.EventDefinitionID = ed.ID
         LEFT JOIN tEventCode ec ON e.EventCodeID = ec.ID
         WHERE e.StartDateTime >= ?
-          AND e.StartDateTime <= ?
+          AND e.StartDateTime < DATEADD(day, 1, CAST(? AS date))
           AND ed.SystemID = (SELECT SystemID FROM tOeeCalculation WHERE ID = ?)
         ORDER BY e.StartDateTime DESC
     """

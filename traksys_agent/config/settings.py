@@ -1,9 +1,7 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import Dict, Optional
-import os
 from pathlib import Path
 
-# Get the directory where this file is located
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 
@@ -37,6 +35,11 @@ class Settings(BaseSettings):
     # Evaluation
     enable_logging: bool = True
     log_directory: str = "logs"
+
+    # Langfuse Configuration
+    langfuse_public_key: Optional[str] = None
+    langfuse_secret_key: Optional[str] = None
+    langfuse_base_url: str = "http://langfuse-web:3000"
 
     @property
     def mcp_env_vars(self) -> Dict[str, str]:

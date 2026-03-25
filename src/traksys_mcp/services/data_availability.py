@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from datetime import date
 from typing import Optional, Tuple
@@ -56,4 +57,10 @@ class DataAvailabilityCache:
 
     async def refresh_all(self) -> None:
         for table in _TIMESTAMP_COLUMNS:
-            await self.refresh(table)
+                try:
+                    await asyncio.wait_for(self.refresh(table),
+                                           timeout=25.0)
+                except asyncio.TimeoutError:
+                    logger.error("Cache refresh for table %s timed out after 25s", table)
+                except Exception as e:
+                    logger.error("Failed to refresh cache for %s: %s", table, e)

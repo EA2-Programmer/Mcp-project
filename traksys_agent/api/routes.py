@@ -6,13 +6,11 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from .models import ChatCompletionRequest, ChatCompletionResponse, ChatCompletionResponseChoice, ChatMessage, \
     ModelListResponse, ModelObject
-from agent.orchestrator import AgentOrchestrator
-from config.settings import settings
+from ..agent.orchestrator import AgentOrchestrator
+from ..config.settings import settings
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
-
-# This will be injected by main.py
 orchestrator: AgentOrchestrator = None
 
 
@@ -31,9 +29,9 @@ async def list_models():
         ]
     )
 
-
 @router.post("/chat/completions")
-async def chat_completions(request: ChatCompletionRequest, orch: AgentOrchestrator = Depends(get_orchestrator)):
+async def chat_completions(request: ChatCompletionRequest,
+                           orch: AgentOrchestrator = Depends(get_orchestrator)):
     """OpenAI-compatible chat completions endpoint with SSE streaming."""
 
     logger.info(f"Received chat request for model: {request.model} | Stream: {request.stream}")
