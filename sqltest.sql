@@ -1,4 +1,4 @@
-USE [EBR_Template]
+    USE [EBR_Template]
 GO
 
 INSERT INTO [dbo].[tOeeCalculation] (
@@ -205,3 +205,80 @@ VALUES
     0, 'System', 'Optical sensor PE-404 lost alignment.', SYSDATETIMEOFFSET(), NULL
 );
 GO
+
+
+-- 1. All recent batches (default behavior)
+SELECT TOP 50 b.ID, b.Name, b.AltName, b.SystemID, b.JobID, b.Lot, b.State,
+       CAST(b.StartDateTime AS datetime) AS StartDateTime,
+       j.Name AS JobName, p.Name AS ProductName
+FROM tBatch b
+LEFT JOIN tJob j ON b.JobID = j.ID
+LEFT JOIN tProduct p ON j.ProductID = p.ID
+ORDER BY b.StartDateTime DESC;
+
+-- 2. Specific batch by ID
+SELECT TOP 50 ... FROM tBatch b ... WHERE b.ID = 456;
+
+-- 3. By batch name (long code)
+SELECT TOP 50 ... FROM tBatch b ...
+WHERE b.Name = '00001_FAC1_00010001_SubPO1_MBR1_0100_A1_2'
+   OR b.AltName = '00001_FAC1_00010001_SubPO1_MBR1_0100_A1_2';
+
+-- 4. By system / production line
+SELECT TOP 50 ... FROM tBatch b ... WHERE b.SystemID = 3;
+
+-- 5. Time window (last 7 days example)
+SELECT TOP 50 ... FROM tBatch b ...
+WHERE b.StartDateTime >= '2025-09-01'
+  AND b.EndDateTime   <= '2025-09-16';
+
+-- 1. All parameters for a specific batch
+SELECT TOP 100 bp.ID AS parameter_id, b.Name AS batch_name, pd.Name AS parameter_name,
+       bp.Value, TRY_CAST(bp.Value AS float) AS value_numeric,
+       pd.MinimumValue, pd.MaximumValue,
+       CASE WHEN TRY_CAST(bp.Value AS float) NOT BETWEEN pd.MinimumValue AND pd.MaximumValue
+            THEN 1 ELSE 0 END AS is_deviation
+FROM tBatchParameter bp
+INNER JOIN tBatch b ON bp.BatchID = b.ID
+INNER JOIN tParameterDefinition pd ON bp.ParameterDefinitionID = pd.ID
+WHERE bp.BatchID = 456
+ORDER BY pd.DisplayOrder;
+
+-- 2. Only deviations (deviation_only=true)
+... WHERE ... AND (TRY_CAST(bp.Value AS float) < pd.MinimumValue
+               OR TRY_CAST(bp.Value AS float) > pd.MaximumValue);
+
+-- 3. Filter by specific parameter names
+... WHERE pd.Name IN ('Temperature batch', 'Filling Weight');
+
+-- 4. Across a time window (no batch_id)
+... WHERE b.StartDateTime >= '2025-09-01'
+      AND b.EndDateTime   <= '2025-09-16';
+
+-- 5. With name resolution + specific names
+... WHERE bp.BatchID = (SELECT TOP 1 ID FROM tBatch
+                        WHERE Name = '00001_FAC1_00010001_SubPO1_MBR1_0020_A1_1')
+      AND pd.Name IN ('Temperature batch');
+
+-- 1. Materials for a specific job (most common)
+SELECT TOP 100 mua.ID, mua.JobID, b.Name AS batch_name, mat.Name AS material_name,
+       mat.MaterialCode, mua.Quantity AS consumed_quantity, mua.DateTime
+FROM tMaterialUseActual mua
+INNER JOIN tBatch b ON mua.JobID = b.JobID
+INNER JOIN tMaterial mat ON mua.MaterialID = mat.ID
+WHERE mua.JobID = 1187
+ORDER BY mua.DateTime DESC;
+
+-- 2. Using batch_id (the tool resolves internally)
+... WHERE b.ID = 456;
+
+-- 3. By batch name
+... WHERE b.Name = '00001_FAC1_00010001_SubPO1_MBR1_0100_A1_2';
+
+-- 4. Time window across multiple jobs
+... WHERE mua.DateTime >= '2025-09-01'
+      AND mua.DateTime <= '2025-09-16';
+
+-- 5. Filter by material name/code
+... WHERE mat.Name IN ('Material 1')
+      OR mat.MaterialCode IN ('M1');

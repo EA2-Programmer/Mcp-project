@@ -1,14 +1,19 @@
 import re
+import os
 import logging
 from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# Get the directory where this file is located
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env",
+        # This checks the current directory, the src folder, AND the root folder
+        env_file=(".env", "src/.env", "../.env", "../../.env"),
         env_file_encoding="utf-8",
-        case_sensitive=True,
+        # Set to False to handle Windows environment variable quirks
+        case_sensitive=False,
         extra="ignore",
         frozen=True,
     )
@@ -91,7 +96,6 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def writes_require_read_only_false(self) -> "Settings":
-        """ENABLE_WRITES=true with READ_ONLY=true is a conflicting config that risks accidental data modification."""
         if self.ENABLE_WRITES and self.READ_ONLY:
             raise ValueError(
                 "Conflicting config: ENABLE_WRITES=true but READ_ONLY=true. "
@@ -113,5 +117,5 @@ class Settings(BaseSettings):
     def __str__(self) -> str:
         return self.__repr__()
 
-
+# Final initialization
 settings = Settings()

@@ -1,0 +1,16 @@
+image: node:20-alpine
+
+pages:
+  stage: deploy
+  script:
+    - cd team-project-website
+    - npm install
+    - npm run build
+    - cd ..
+    - rm -rf public
+    - mv team-project-website/out public
+  artifacts:
+    paths:
+      - public
+  only:
+    - main

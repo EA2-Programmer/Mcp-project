@@ -6,8 +6,8 @@ from pathlib import Path
 # Get the directory where this file is located
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+
 class Settings(BaseSettings):
-    # Pydantic Settings configuration
     model_config = SettingsConfigDict(
         env_file=str(BASE_DIR / ".env"),
         env_file_encoding="utf-8",
@@ -17,17 +17,17 @@ class Settings(BaseSettings):
 
     # OpenAI Configuration
     openai_api_key: str
-    openai_model: str = "gpt-5-mini"  # The REAL model for the brain
-    agent_model_name: str = "TrakSYS-Agent" # The DISPLAY name for OpenWebUI
-    
-    temperature: float = 0.7
-    # max_tokens: int = 2000
+    openai_model: str = "gpt-5"
+    agent_model_name: str = "TrakSYS-Agent"
+    temperature: float = 0.4
 
     # MCP Server
-    mcp_server_path: str = r"C:\Kdg\year 3\LAB\Lab project\src\traksys_mcp\server.py"
+    mcp_server_path: str
+    mssql_connection_string: str
 
-    # Database connection (passed to MCP)
-    mssql_connection_string: str = "Driver={ODBC Driver 17 for SQL Server};Server=localhost;Database=EBR_Template;Trusted_Connection=yes;"
+    # NEW: Add the optional MCP configuration fields
+    max_rows: int = 1000
+    read_only: bool = True
 
     # API Server
     api_port: int = 8000
@@ -40,9 +40,13 @@ class Settings(BaseSettings):
 
     @property
     def mcp_env_vars(self) -> Dict[str, str]:
+        """Passes environment variables down to the MCP subprocess."""
         return {
-            "MSSQL_CONNECTION_STRING": self.mssql_connection_string
+            "MSSQL_CONNECTION_STRING": self.mssql_connection_string,
+            "MAX_ROWS": str(self.max_rows),
+            "READ_ONLY": str(self.read_only).lower()  # standardizes to 'true'/'false'
         }
+
 
 # Global settings instance
 settings = Settings()

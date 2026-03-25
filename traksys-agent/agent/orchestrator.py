@@ -1,18 +1,14 @@
 import json
 import logging
-import time
+import asyncio
 from typing import AsyncGenerator, List, Dict, Any
-
 from .openai_client import OpenAIClient
 from .function_registry import FunctionRegistry
 from mcp.client import MCPClient
 
-# Simplified import - no more register_instance / init_tracing
-from src.traksys_mcp.services.langfuse_tracing import TracingService, _NoOpSpan
-
 
 class AgentOrchestrator:
-    """The 'Brain' of the agent. Manages the LLM loop and tool executions."""
+    """The 'Brain' of the agent. Manages the LLM loop, parallel tool executions, and streaming."""
 
     def __init__(
             self,
@@ -27,132 +23,81 @@ class AgentOrchestrator:
         self.system_prompt = system_prompt
         self.logger = logging.getLogger(__name__)
 
-        # Direct instantiation - clean and reliable
-        self.tracing = TracingService()
-
     async def chat(self, messages: List[Dict[str, str]]) -> AsyncGenerator[str, None]:
-        """Main chat loop with multi-turn tool calling support."""
+        """Main chat loop with multi-turn tool calling and SSE streaming support."""
 
-        user_query = messages[-1].get("content", "") if messages else ""
+        full_messages = [{"role": "system", "content": self.system_prompt}] + messages
+        tools = await self.registry.get_openai_tools()
+        max_iterations = 10
+        iteration = 0
 
-        async with self.tracing.trace_chat(
-                user_query=user_query,
-                messages=messages,
-                model="gpt-4o",
-                agent_name="TrakSYS-Agent"
-        ) as trace:
+        while iteration < max_iterations:
+            iteration += 1
+            self.logger.info("Calling LLM to determine next action...")
 
-            is_tracing_enabled = not isinstance(trace, _NoOpSpan)
-            full_messages = [{"role": "system", "content": self.system_prompt}] + messages
-            tools = await self.registry.get_openai_tools()
+            # Step 1: Use stream=False for the decision phase. It's much safer for parsing parallel tool calls.
+            response = await self.openai_client.get_completion(
+                messages=full_messages,
+                tools=tools,
+                stream=False
+            )
 
-            final_answer = ""
-            turn = 0
+            message = response.choices[0].message
+            full_messages.append(message.model_dump(exclude_none=True))
 
-            try:
-                while True:
-                    turn += 1
+            # Step 2: If the LLM wants to talk to the user directly, we break and STREAM the final response
+            if not message.tool_calls:
+                self.logger.info("No tool calls. Streaming final answer to user.")
+                # Pop the last static message so we can re-request it as a stream
+                full_messages.pop()
 
-                    if is_tracing_enabled:
-                        llm_span = self.tracing.record_llm_call(
-                            parent=trace,
-                            turn=turn,
-                            messages_count=len(full_messages),
-                            tools_count=len(tools)
-                        )
-                    else:
-                        llm_span = _NoOpSpan()
+                stream_response = await self.openai_client.get_completion(
+                    messages=full_messages,
+                    tools=tools,
+                    stream=True
+                )
 
-                    response = await self.openai_client.get_completion(
-                        messages=full_messages,
-                        tools=tools,
-                        stream=False,
-                    )
+                async for chunk in stream_response:
+                    content = chunk.choices[0].delta.content
+                    if content:
+                        yield content
+                break
 
-                    message = response.choices[0].message
-                    full_messages.append(message)
+            # Step 3: If tools are requested, execute them in PARALLEL
+            self.logger.info(f"Executing {len(message.tool_calls)} tool(s) in parallel...")
 
-                    if is_tracing_enabled:
-                        llm_span.update(output={
-                            "has_tool_calls": bool(message.tool_calls),
-                            "tool_call_count": len(message.tool_calls) if message.tool_calls else 0,
-                            "content_preview": (message.content or "")[:200],
-                        })
-                        llm_span.end()
+            async def execute_single_tool(tool_call):
+                tool_name = tool_call.function.name
+                tool_args = json.loads(tool_call.function.arguments)
+                self.logger.info(f"Tool Request -> {tool_name}({tool_args})")
 
-                    if not message.tool_calls:
-                        final_answer = message.content
-                        yield message.content
-                        break
+                try:
+                    # MCP server call
+                    result = await self.mcp_client.call_tool(tool_name, tool_args)
+                    return {
+                        "role": "tool",
+                        "tool_call_id": tool_call.id,
+                        "name": tool_name,
+                        "content": json.dumps(result)
+                    }
+                except Exception as e:
+                    self.logger.error(f"Tool {tool_name} failed: {e}")
+                    return {
+                        "role": "tool",
+                        "tool_call_id": tool_call.id,
+                        "name": tool_name,
+                        "content": json.dumps(
+                            {"status": "error", "error": str(e), "suggestions": ["Check parameters and try again."]})
+                    }
 
-                    for tool_call in message.tool_calls:
-                        tool_name = tool_call.function.name
-                        tool_args = json.loads(tool_call.function.arguments)
+            # Run all requested tools simultaneously using asyncio.gather
+            tool_results = await asyncio.gather(*(execute_single_tool(tc) for tc in message.tool_calls))
 
-                        self.logger.info(f"Executing tool: {tool_name}")
+            # Append all results to the conversation history
+            full_messages.extend(tool_results)
 
-                        if is_tracing_enabled:
-                            tool_span = trace.span(
-                                name=f"tools/call_{tool_name}",
-                                input={
-                                    "tool_name": tool_name,
-                                    "raw_arguments": tool_args,
-                                },
-                                metadata={"tool_call_id": tool_call.id},
-                            )
-                        else:
-                            tool_span = _NoOpSpan()
-
-                        t_start = time.monotonic()
-                        try:
-                            result = await self.mcp_client.call_tool(tool_name, tool_args)
-                            latency_ms = round((time.monotonic() - t_start) * 1000)
-
-                            if is_tracing_enabled:
-                                tool_span.update(
-                                    output={
-                                        "raw_result": result,
-                                        "status": "success",
-                                        "latency_ms": latency_ms,
-                                    },
-                                    metadata={"latency_ms": latency_ms},
-                                )
-                                tool_span.end()
-
-                            full_messages.append({
-                                "role": "tool",
-                                "tool_call_id": tool_call.id,
-                                "name": tool_name,
-                                "content": json.dumps(result),
-                            })
-
-                        except Exception as e:
-                            self.logger.error(f"Tool failed: {e}")
-                            if is_tracing_enabled:
-                                tool_span.update(
-                                    output={"error": str(e)},
-                                    level="ERROR",
-                                    status_message=str(e),
-                                )
-                                tool_span.end()
-
-                            full_messages.append({
-                                "role": "tool",
-                                "tool_call_id": tool_call.id,
-                                "name": tool_name,
-                                "content": json.dumps({"error": str(e)}),
-                            })
-
-            except Exception as e:
-                self.logger.error(f"Agent chat failed: {e}")
-                if is_tracing_enabled:
-                    self.tracing.record_error(trace, e, "agent_chat")
-                raise
-
-            finally:
-                if is_tracing_enabled:
-                    self.tracing.set_trace_output(trace, {
-                        "final_answer": final_answer[:500],
-                        "total_turns": turn,
-                    })
-                    self.tracing.shutdown()
+            # The loop will now restart, feeding the tool results back to the LLM
+        else:
+            # Exceeded max_iterations — yield a safe fallback message
+            self.logger.error("Agent exceeded max_iterations (%d). Returning fallback response.", max_iterations)
+            yield "I wasn't able to complete this request — the reasoning loop exceeded its limit. Please try rephrasing your question or narrowing the scope."

@@ -82,25 +82,33 @@ class MCPClient:
             self.logger.error(f"Error during call {method}: {e}")
             raise
 
+        # Updated snippet for mcp/client.py -> _read_loop
     async def _read_loop(self):
         """Continuous loop to read stdout from the MCP server."""
         try:
             while True:
                 line = await self.manager.process.stdout.readline()
                 if not line:
-                    break
-                
+                    self.logger.error("MCP Server stdout closed. Process likely died.")
+                    break  # Break out of the loop if the stream ends
+
                 response = JSONRPCHelper.parse_response(line.decode())
                 resp_id = response.get("id")
-                
+
                 if resp_id in self._response_futures:
                     self._response_futures[resp_id].set_result(response)
                     del self._response_futures[resp_id]
                 else:
-                    # Log notifications or stray messages
                     self.logger.debug(f"Received notification: {response}")
         except Exception as e:
             self.logger.error(f"Read loop error: {e}")
+        finally:
+            # SAFETY NET: If the read loop crashes or ends, cancel all pending requests
+            # so the agent doesn't hang waiting for responses that will never arrive.
+            for future in self._response_futures.values():
+                if not future.done():
+                    future.set_exception(ConnectionError("MCP Server disconnected unexpectedly."))
+            self._response_futures.clear()
 
     async def disconnect(self):
         """Cleanup and stop the server."""
