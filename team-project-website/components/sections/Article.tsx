@@ -11,7 +11,7 @@ export default function Articles() {
     const [isDownloading, setIsDownloading] = useState(false);
     const contentRef = useRef<HTMLDivElement>(null);
 
-    // Deep linking from Extra.tsx (TrackSys DB → page 2, MCP Bridge → page 4, Secure Tunnel → page 9)
+    // Deep linking from Extra.tsx
     useEffect(() => {
         const handleExternalOpen = (e: any) => {
             const pageNumber = e.detail?.page;
@@ -60,7 +60,6 @@ export default function Articles() {
             for (let i = 0; i < pages.length; i++) {
                 const page = pages[i];
 
-                // Ensure all images are loaded
                 const images = page.querySelectorAll('img');
                 await Promise.all(
                     Array.from(images).map((img) => {
@@ -127,106 +126,101 @@ export default function Articles() {
         }
     };
 
-    // FULL ARTICLE CONTENT - YOUR ORIGINAL TEXT (all 12 pages preserved)
     const articleContent = `
         <style>
             .pdf-viewer {
                 background: #525659;
-                padding: 48px 0;
+                padding: 24px 16px;
                 display: flex;
                 flex-direction: column;
                 align-items: center;
-                gap: 24px;
+                gap: 20px;
                 min-height: 100vh;
             }
             
             .document-page {
                 background: white;
-                width: 900px;
-                min-height: 1350px;
-                padding: 72px 80px 190px 80px;
+                width: 100%;
+                max-width: 900px;
+                padding: 40px 24px 100px 24px;
                 color: #1a1a1a;
                 font-family: 'Georgia', 'Times New Roman', Times, serif;
                 position: relative;
-                border-radius: 2px;
+                border-radius: 8px;
                 box-shadow: 0 8px 24px rgba(0,0,0,0.2);
+                box-sizing: border-box;
             }
             
             .document-page h1 {
-                font-family: 'Georgia', 'Times New Roman', Times, serif;
-                font-size: 2.5rem;
+                font-size: clamp(1.8rem, 5vw, 2.5rem);
                 font-weight: 700;
                 margin-top: 0;
-                margin-bottom: 1.5rem;
+                margin-bottom: 1rem;
                 line-height: 1.2;
                 color: #000;
             }
             
             .document-page h2 {
-                font-family: 'Georgia', 'Times New Roman', Times, serif;
-                font-size: 1.75rem;
+                font-size: clamp(1.4rem, 4vw, 1.75rem);
                 font-weight: 600;
-                margin-top: 2rem;
-                margin-bottom: 1rem;
+                margin-top: 1.5rem;
+                margin-bottom: 0.75rem;
                 padding-bottom: 0.5rem;
                 border-bottom: 2px solid #e5e5e5;
                 color: #000;
             }
             
             .document-page h3 {
-                font-family: 'Georgia', 'Times New Roman', Times, serif;
-                font-size: 1.25rem;
+                font-size: clamp(1.1rem, 3.5vw, 1.25rem);
                 font-weight: 600;
-                margin-top: 1.5rem;
-                margin-bottom: 0.75rem;
+                margin-top: 1.25rem;
+                margin-bottom: 0.5rem;
                 color: #111;
             }
             
             .document-page p {
-                font-family: 'Georgia', 'Times New Roman', Times, serif;
-                margin-bottom: 1rem;
+                font-size: clamp(0.9rem, 3vw, 1rem);
+                margin-bottom: 0.85rem;
                 line-height: 1.6;
                 color: #333;
-                font-size: 1rem;
             }
             
             .document-page ul, .document-page ol {
-                font-family: 'Georgia', 'Times New Roman', Times, serif;
-                margin-bottom: 1rem;
-                padding-left: 1.75rem;
+                margin-bottom: 0.85rem;
+                padding-left: 1.5rem;
             }
             
             .document-page li {
-                font-family: 'Georgia', 'Times New Roman', Times, serif;
-                margin-bottom: 0.5rem;
+                font-size: clamp(0.9rem, 3vw, 1rem);
+                margin-bottom: 0.4rem;
                 line-height: 1.6;
-                font-size: 1rem;
             }
             
             .document-page code {
                 font-family: 'SF Mono', 'Courier New', monospace;
                 background: #f4f4f4;
-                padding: 0.2rem 0.4rem;
+                padding: 0.15rem 0.35rem;
                 border-radius: 4px;
-                font-size: 0.875em;
+                font-size: 0.85em;
+                word-break: break-word;
             }
             
             .document-page pre {
                 font-family: 'SF Mono', 'Courier New', monospace;
                 background: #1e1e1e;
                 color: #d4d4d4;
-                padding: 1rem;
+                padding: 0.85rem;
                 border-radius: 8px;
                 overflow-x: auto;
-                margin-bottom: 1rem;
-                font-size: 0.85rem;
+                margin-bottom: 0.85rem;
+                font-size: 0.8rem;
             }
             
             .document-page blockquote {
                 font-family: 'Georgia', 'Times New Roman', Times, serif;
                 border-left: 4px solid #3b82f6;
-                padding-left: 1rem;
-                margin: 1rem 0;
+                padding-left: 0.85rem;
+                margin: 0.85rem 0;
                 color: #555;
                 font-style: italic;
             }
@@ -235,7 +229,7 @@ export default function Articles() {
                 max-width: 100%;
                 height: auto;
                 border-radius: 8px;
-                margin: 1rem 0;
+                margin: 0.85rem 0;
                 box-shadow: 0 1px 3px rgba(0,0,0,0.1);
                 border: 1px solid #e5e7eb;
                 display: block;
@@ -244,19 +238,19 @@ export default function Articles() {
             .page-footer {
                 font-family: 'SF Mono', 'Courier New', monospace;
                 position: absolute;
-                bottom: 45px;
-                left: 80px;
-                right: 80px;
+                bottom: 24px;
+                left: 24px;
+                right: 24px;
                 text-align: center;
-                font-size: 11px;
+                font-size: 10px;
                 color: #9ca3af;
                 border-top: 1px solid #e5e7eb;
-                padding-top: 12px;
+                padding-top: 10px;
                 background: white;
             }
             
             hr {
-                margin: 2rem 0;
+                margin: 1.5rem 0;
                 border: none;
                 border-top: 1px solid #e5e7eb;
             }
@@ -264,10 +258,34 @@ export default function Articles() {
             a {
                 color: #3b82f6;
                 text-decoration: none;
+                word-break: break-all;
             }
             
             a:hover {
                 text-decoration: underline;
+            }
+            
+            @media (min-width: 768px) {
+                .pdf-viewer {
+                    padding: 48px 0;
+                    gap: 24px;
+                }
+                .document-page {
+                    padding: 72px 80px 120px 80px;
+                    border-radius: 2px;
+                }
+                .document-page h1 {
+                    margin-bottom: 1.5rem;
+                }
+                .document-page p {
+                    margin-bottom: 1rem;
+                }
+                .page-footer {
+                    bottom: 36px;
+                    left: 80px;
+                    right: 80px;
+                    font-size: 11px;
+                }
             }
         </style>
         
@@ -575,33 +593,34 @@ export default function Articles() {
     `;
 
     return (
-        <section id="articles" className="py-32 px-6 flex flex-col items-center">
-            <div className="max-w-4xl w-full text-center mb-12">
-                <h2 className="text-sm font-mono text-blue-500 tracking-[0.5em] uppercase mb-4">Documentation_Log</h2>
-                <h3 className="text-4xl font-bold text-white tracking-tight">Technical Whitepaper</h3>
+        <section id="articles" className="py-16 sm:py-32 px-4 sm:px-6 flex flex-col items-center">
+            <div className="max-w-4xl w-full text-center mb-8 sm:mb-12">
+                <h2 className="text-xs sm:text-sm font-mono text-blue-500 tracking-[0.5em] uppercase mb-3 sm:mb-4">Documentation_Log</h2>
+                <h3 className="text-2xl sm:text-3xl md:text-4xl font-bold text-white tracking-tight">Technical Whitepaper</h3>
             </div>
 
-            {/* FIXED THUMBNAIL CARD - opens on first click on GitLab Pages */}
+            {/* THUMBNAIL CARD - Works on ALL devices (PC, tablet, mobile) */}
             <motion.div
                 layoutId="article-card"
                 onClick={() => setIsOpen(true)}
-                onPointerDown={() => setIsOpen(true)}
-                className="group relative cursor-pointer w-full max-w-2xl aspect-[3/4] md:aspect-[16/9] bg-[#0d0d0d] border border-white/10 rounded-xl overflow-hidden shadow-2xl transition-all hover:border-blue-500/50 active:scale-[0.98]"
+                onTouchStart={() => setIsOpen(true)}
+                style={{ cursor: 'pointer' }}
+                className="group relative w-full max-w-2xl aspect-[4/3] sm:aspect-[16/9] bg-[#0d0d0d] border border-white/10 rounded-xl overflow-hidden shadow-2xl transition-all hover:border-blue-500/50 active:scale-[0.98] hover:shadow-blue-500/20"
             >
                 <div className="absolute inset-0 bg-gradient-to-b from-white/[0.02] to-transparent" />
-                <div className="absolute inset-0 flex flex-col items-center justify-center p-12 text-center">
-                    <FileText size={64} className="text-blue-600 mb-6 group-hover:scale-110 transition-transform duration-500" />
-                    <h4 className="text-2xl font-bold text-white mb-2 tracking-tight">The TrakSYS Paradox</h4>
-                    <p className="text-gray-500 font-mono text-xs uppercase tracking-widest mb-8">TECHNICAL WHITEPAPER // 12 PAGES</p>
-                    <div className="flex items-center gap-2 text-blue-400 font-semibold group-hover:text-blue-300 transition-colors">
-                        <Maximize2 size={18} />
+                <div className="absolute inset-0 flex flex-col items-center justify-center p-6 sm:p-12 text-center">
+                    <FileText size={40} className="sm:text-6xl text-blue-600 mb-4 sm:mb-6 group-hover:scale-110 transition-transform duration-500" />
+                    <h4 className="text-xl sm:text-2xl font-bold text-white mb-1 sm:mb-2 tracking-tight">The TrakSYS Paradox</h4>
+                    <p className="text-gray-500 font-mono text-[10px] sm:text-xs uppercase tracking-widest mb-4 sm:mb-8">TECHNICAL WHITEPAPER // 12 PAGES</p>
+                    <div className="flex items-center gap-2 text-blue-400 font-semibold group-hover:text-blue-300 transition-colors text-sm sm:text-base">
+                        <Maximize2 size={16} className="sm:w-[18px] sm:h-[18px]" />
                         <span>Click to Expand & Read</span>
                     </div>
                 </div>
-                <div className="absolute top-0 right-0 w-16 h-16 bg-white/5 border-b border-l border-white/10 -translate-y-8 translate-x-8 rotate-45 group-hover:translate-y-0 group-hover:translate-x-0 transition-all duration-500" />
+                <div className="absolute top-0 right-0 w-12 h-12 sm:w-16 sm:h-16 bg-white/5 border-b border-l border-white/10 -translate-y-6 sm:-translate-y-8 translate-x-6 sm:translate-x-8 rotate-45 group-hover:translate-y-0 group-hover:translate-x-0 transition-all duration-500" />
             </motion.div>
 
-            {/* FULLSCREEN MODAL */}
+            {/* FULLSCREEN MODAL - Responsive */}
             <AnimatePresence>
                 {isOpen && (
                     <motion.div
@@ -610,30 +629,31 @@ export default function Articles() {
                         exit={{ opacity: 0 }}
                         className="fixed inset-0 z-[100] bg-black/90 flex flex-col items-center overflow-hidden"
                     >
-                        {/* CONTROL BAR */}
-                        <div className="w-full bg-[#2d2d2d] border-b border-white/10 py-3 px-6 flex items-center justify-between z-10 shadow-lg shrink-0">
-                            <div className="flex items-center gap-3 text-white font-mono text-sm">
-                                <FileText size={18} className="text-blue-400" />
-                                <span>The_TrakSYS_Paradox_Whitepaper.pdf</span>
+                        {/* CONTROL BAR - Responsive */}
+                        <div className="w-full bg-[#2d2d2d] border-b border-white/10 py-2 sm:py-3 px-3 sm:px-6 flex items-center justify-between z-10 shadow-lg shrink-0">
+                            <div className="flex items-center gap-2 sm:gap-3 text-white font-mono text-[10px] sm:text-sm">
+                                <FileText size={14} className="sm:w-[18px] sm:h-[18px] text-blue-400" />
+                                <span className="truncate max-w-[120px] sm:max-w-none">The_TrakSYS_Paradox_Whitepaper.pdf</span>
                             </div>
-                            <div className="flex gap-3">
+                            <div className="flex gap-2 sm:gap-3">
                                 <button
                                     onClick={generatePDF}
                                     disabled={isDownloading}
-                                    className={`flex items-center gap-2 px-4 py-1.5 rounded-md text-white text-xs font-semibold transition ${
+                                    className={`flex items-center gap-1 sm:gap-2 px-2 sm:px-4 py-1 sm:py-1.5 rounded-md text-white text-[10px] sm:text-xs font-semibold transition ${
                                         isDownloading 
                                             ? 'bg-gray-500 cursor-not-allowed' 
                                             : 'bg-blue-600 hover:bg-blue-500'
                                     }`}
                                 >
-                                    <Download size={14} />
-                                    {isDownloading ? 'GENERATING...' : 'DOWNLOAD PDF'}
+                                    <Download size={12} className="sm:w-[14px] sm:h-[14px]" />
+                                    <span className="hidden sm:inline">{isDownloading ? 'GENERATING...' : 'DOWNLOAD PDF'}</span>
+                                    <span className="sm:hidden">{isDownloading ? '...' : 'PDF'}</span>
                                 </button>
                                 <button
                                     onClick={() => setIsOpen(false)}
-                                    className="p-1.5 bg-red-600/80 rounded-md text-white hover:bg-red-500 transition"
+                                    className="p-1 sm:p-1.5 bg-red-600/80 rounded-md text-white hover:bg-red-500 transition"
                                 >
-                                    <X size={18} />
+                                    <X size={14} className="sm:w-[18px] sm:h-[18px]" />
                                 </button>
                             </div>
                         </div>
