@@ -599,13 +599,12 @@ export default function Articles() {
                 <h3 className="text-2xl sm:text-3xl md:text-4xl font-bold text-white tracking-tight">Technical Whitepaper</h3>
             </div>
 
-            {/* THUMBNAIL CARD - Works on ALL devices (PC, tablet, mobile) */}
+            {/* THUMBNAIL CARD - Responsive */}
             <motion.div
                 layoutId="article-card"
                 onClick={() => setIsOpen(true)}
-                onTouchStart={() => setIsOpen(true)}
-                style={{ cursor: 'pointer' }}
-                className="group relative w-full max-w-2xl aspect-[4/3] sm:aspect-[16/9] bg-[#0d0d0d] border border-white/10 rounded-xl overflow-hidden shadow-2xl transition-all hover:border-blue-500/50 active:scale-[0.98] hover:shadow-blue-500/20"
+                onPointerDown={() => setIsOpen(true)}
+                className="group relative cursor-pointer w-full max-w-2xl aspect-[4/3] sm:aspect-[16/9] bg-[#0d0d0d] border border-white/10 rounded-xl overflow-hidden shadow-2xl transition-all hover:border-blue-500/50 active:scale-[0.98]"
             >
                 <div className="absolute inset-0 bg-gradient-to-b from-white/[0.02] to-transparent" />
                 <div className="absolute inset-0 flex flex-col items-center justify-center p-6 sm:p-12 text-center">
@@ -646,8 +645,8 @@ export default function Articles() {
                                     }`}
                                 >
                                     <Download size={12} className="sm:w-[14px] sm:h-[14px]" />
-                                    <span className="hidden sm:inline">{isDownloading ? 'GENERATING...' : 'DOWNLOAD PDF'}</span>
-                                    <span className="sm:hidden">{isDownloading ? '...' : 'PDF'}</span>
+                                    <span className="hidden xs:inline">{isDownloading ? 'GENERATING...' : 'DOWNLOAD PDF'}</span>
+                                    <span className="xs:hidden">{isDownloading ? '...' : 'PDF'}</span>
                                 </button>
                                 <button
                                     onClick={() => setIsOpen(false)}
