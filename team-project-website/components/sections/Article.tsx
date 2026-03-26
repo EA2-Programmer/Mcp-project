@@ -11,10 +11,12 @@ export default function Articles() {
     const [isDownloading, setIsDownloading] = useState(false);
     const contentRef = useRef<HTMLDivElement>(null);
 
-    // Deep linking from Extra.tsx cards
+    // Deep linking from Extra.tsx (TrackSys DB → page 2, MCP Bridge → page 4, Secure Tunnel → page 9)
     useEffect(() => {
         const handleExternalOpen = (e: any) => {
-            const pageNumber = e.detail.page;
+            const pageNumber = e.detail?.page;
+            if (!pageNumber) return;
+
             setIsOpen(true);
 
             setTimeout(() => {
@@ -25,8 +27,9 @@ export default function Articles() {
                         block: 'start'
                     });
                 }
-            }, 800);
+            }, 900);
         };
+
         window.addEventListener('open-article', handleExternalOpen);
         return () => window.removeEventListener('open-article', handleExternalOpen);
     }, []);
@@ -50,10 +53,8 @@ export default function Articles() {
             const pdf = new jsPDF('p', 'mm', 'a4');
             const pageWidth = pdf.internal.pageSize.getWidth();
 
-            // Increased initial delay to ensure the modal and all content is fully rendered
             await new Promise(resolve => setTimeout(resolve, 600));
 
-            // Refresh pages reference
             pages = Array.from(element.querySelectorAll('.document-page')) as HTMLElement[];
 
             for (let i = 0; i < pages.length; i++) {
@@ -85,7 +86,6 @@ export default function Articles() {
                     height: page.scrollHeight,
                     removeContainer: true,
                     onclone: (clonedDoc, clonedElement) => {
-                        // Fix footer positioning in cloned document
                         const clonedPages = clonedDoc.querySelectorAll('.document-page');
                         clonedPages.forEach((clonedPage: Element) => {
                             const footer = clonedPage.querySelector('.page-footer') as HTMLElement;
@@ -95,23 +95,15 @@ export default function Articles() {
                                 footer.style.left = '80px';
                                 footer.style.right = '80px';
                                 footer.style.width = 'auto';
-                                footer.style.visibility = 'visible';
-                                footer.style.opacity = '1';
                             }
                         });
 
-                        // Ensure cloned element is visible
                         if (clonedElement instanceof HTMLElement) {
                             clonedElement.style.visibility = 'visible';
                             clonedElement.style.opacity = '1';
                             clonedElement.style.display = 'block';
                             clonedElement.style.position = 'relative';
                         }
-
-                        // Extra safety for all pages
-                        clonedDoc.querySelectorAll('.document-page').forEach((el: Element) => {
-                            (el as HTMLElement).style.visibility = 'visible';
-                        });
                     }
                 });
 
@@ -135,6 +127,7 @@ export default function Articles() {
         }
     };
 
+    // FULL ARTICLE CONTENT - YOUR ORIGINAL TEXT (all 12 pages preserved)
     const articleContent = `
         <style>
             .pdf-viewer {
@@ -275,23 +268,6 @@ export default function Articles() {
             
             a:hover {
                 text-decoration: underline;
-            }
-            
-            @media print {
-                .pdf-viewer {
-                    background: white;
-                    padding: 0;
-                }
-                .document-page {
-                    page-break-after: always;
-                    box-shadow: none;
-                    padding: 2.54cm;
-                    width: 100%;
-                }
-                .page-footer {
-                    position: fixed;
-                    bottom: 0;
-                }
             }
         </style>
         
@@ -531,10 +507,10 @@ export default function Articles() {
                     This single event dropped the daily OEE by ~22 points."
                 </blockquote>
                 
-                <div class=""><img src="/images/Article/Line%20E2.png" alt=""><img src="/images/Article/OEE.png" alt=""></div>
-
+                <img src="/images/Article/Line%20E2.png" alt="Demo Screenshot">
+                <img src="/images/Article/OEE.png" alt="OEE Chart">
                 
-               <div class="page-footer">10 / 12</div>
+                <div class="page-footer">10 / 12</div>
             </div>
             
             <!-- PAGE 11 -->
@@ -605,11 +581,12 @@ export default function Articles() {
                 <h3 className="text-4xl font-bold text-white tracking-tight">Technical Whitepaper</h3>
             </div>
 
-            {/* THUMBNAIL CARD */}
+            {/* FIXED THUMBNAIL CARD - opens on first click on GitLab Pages */}
             <motion.div
                 layoutId="article-card"
                 onClick={() => setIsOpen(true)}
-                className="group relative cursor-pointer w-full max-w-2xl aspect-[3/4] md:aspect-[16/9] bg-[#0d0d0d] border border-white/10 rounded-xl overflow-hidden shadow-2xl transition-all hover:border-blue-500/50"
+                onPointerDown={() => setIsOpen(true)}
+                className="group relative cursor-pointer w-full max-w-2xl aspect-[3/4] md:aspect-[16/9] bg-[#0d0d0d] border border-white/10 rounded-xl overflow-hidden shadow-2xl transition-all hover:border-blue-500/50 active:scale-[0.98]"
             >
                 <div className="absolute inset-0 bg-gradient-to-b from-white/[0.02] to-transparent" />
                 <div className="absolute inset-0 flex flex-col items-center justify-center p-12 text-center">
@@ -624,7 +601,7 @@ export default function Articles() {
                 <div className="absolute top-0 right-0 w-16 h-16 bg-white/5 border-b border-l border-white/10 -translate-y-8 translate-x-8 rotate-45 group-hover:translate-y-0 group-hover:translate-x-0 transition-all duration-500" />
             </motion.div>
 
-            {/* FULLSCREEN PDF-STYLE MODAL */}
+            {/* FULLSCREEN MODAL */}
             <AnimatePresence>
                 {isOpen && (
                     <motion.div
