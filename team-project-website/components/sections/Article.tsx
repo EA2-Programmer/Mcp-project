@@ -9,18 +9,7 @@ import jsPDF from 'jspdf';
 export default function Articles() {
     const [isOpen, setIsOpen] = useState(false);
     const [isDownloading, setIsDownloading] = useState(false);
-    const [isMobile, setIsMobile] = useState(false);
     const contentRef = useRef<HTMLDivElement>(null);
-
-    // Detect mobile for responsive adjustments
-    useEffect(() => {
-        const checkMobile = () => {
-            setIsMobile(window.innerWidth < 768);
-        };
-        checkMobile();
-        window.addEventListener('resize', checkMobile);
-        return () => window.removeEventListener('resize', checkMobile);
-    }, []);
 
     // Deep linking from Extra.tsx
     useEffect(() => {
@@ -46,7 +35,10 @@ export default function Articles() {
     }, []);
 
     const generatePDF = async () => {
-        if (!contentRef.current) return;
+        if (!contentRef.current) {
+            console.error('Content ref is null');
+            return;
+        }
 
         setIsDownloading(true);
 
@@ -54,12 +46,15 @@ export default function Articles() {
             const element = contentRef.current;
             let pages = Array.from(element.querySelectorAll('.document-page')) as HTMLElement[];
 
-            if (pages.length === 0) throw new Error('No pages found');
+            if (pages.length === 0) {
+                throw new Error('No pages found to generate PDF');
+            }
 
             const pdf = new jsPDF('p', 'mm', 'a4');
             const pageWidth = pdf.internal.pageSize.getWidth();
 
             await new Promise(resolve => setTimeout(resolve, 600));
+
             pages = Array.from(element.querySelectorAll('.document-page')) as HTMLElement[];
 
             for (let i = 0; i < pages.length; i++) {
@@ -89,7 +84,7 @@ export default function Articles() {
                     width: Math.max(page.scrollWidth, 900),
                     height: page.scrollHeight,
                     removeContainer: true,
-                    onclone: (clonedDoc) => {
+                    onclone: (clonedDoc, clonedElement) => {
                         const clonedPages = clonedDoc.querySelectorAll('.document-page');
                         clonedPages.forEach((clonedPage: Element) => {
                             const footer = clonedPage.querySelector('.page-footer') as HTMLElement;
@@ -98,8 +93,16 @@ export default function Articles() {
                                 footer.style.bottom = '45px';
                                 footer.style.left = '80px';
                                 footer.style.right = '80px';
+                                footer.style.width = 'auto';
                             }
                         });
+
+                        if (clonedElement instanceof HTMLElement) {
+                            clonedElement.style.visibility = 'visible';
+                            clonedElement.style.opacity = '1';
+                            clonedElement.style.display = 'block';
+                            clonedElement.style.position = 'relative';
+                        }
                     }
                 });
 
@@ -107,14 +110,17 @@ export default function Articles() {
                 const imgWidth = pageWidth;
                 const imgHeight = (canvas.height * pageWidth) / canvas.width;
 
-                if (i > 0) pdf.addPage();
+                if (i > 0) {
+                    pdf.addPage();
+                }
+
                 pdf.addImage(imgData, 'PNG', 0, 0, imgWidth, imgHeight, undefined, 'FAST');
             }
 
             pdf.save('The_TrakSYS_Paradox_Whitepaper.pdf');
         } catch (error) {
             console.error('Error generating PDF:', error);
-            alert('PDF generation failed. Please try again.');
+            alert('PDF generation failed. Please check the console for details and try again.');
         } finally {
             setIsDownloading(false);
         }
@@ -122,30 +128,20 @@ export default function Articles() {
 
     const articleContent = `
         <style>
-            /* RESET - prevent any layout shifts */
-            * {
-                margin: 0;
-                padding: 0;
-                box-sizing: border-box;
-            }
-            
             .pdf-viewer {
                 background: #525659;
                 padding: 24px 16px;
                 display: flex;
-                    flex-direction: column;
+                flex-direction: column;
                 align-items: center;
                 gap: 20px;
                 min-height: 100vh;
-                width: 100%;
-                position: relative;
             }
             
             .document-page {
                 background: white;
                 width: 100%;
                 max-width: 900px;
-                min-width: 280px;
                 padding: 40px 24px 100px 24px;
                 color: #1a1a1a;
                 font-family: 'Georgia', 'Times New Roman', Times, serif;
@@ -153,64 +149,59 @@ export default function Articles() {
                 border-radius: 8px;
                 box-shadow: 0 8px 24px rgba(0,0,0,0.2);
                 box-sizing: border-box;
-                /* Prevent layout shift */
-                transform: translateZ(0);
-                backface-visibility: hidden;
-                -webkit-font-smoothing: antialiased;
             }
             
-            /* FIXED TYPOGRAPHY - NO TEXT SHIFT */
             .document-page h1 {
-                font-size: 28px;
+                font-size: clamp(1.8rem, 5vw, 2.5rem);
                 font-weight: 700;
                 margin-top: 0;
-                margin-bottom: 16px;
-                line-height: 1.25;
+                margin-bottom: 1rem;
+                line-height: 1.2;
                 color: #000;
             }
             
             .document-page h2 {
-                font-size: 22px;
+                font-size: clamp(1.4rem, 4vw, 1.75rem);
                 font-weight: 600;
-                margin-top: 28px;
-                margin-bottom: 12px;
-                padding-bottom: 8px;
+                margin-top: 1.5rem;
+                margin-bottom: 0.75rem;
+                padding-bottom: 0.5rem;
                 border-bottom: 2px solid #e5e5e5;
                 color: #000;
             }
             
             .document-page h3 {
-                font-size: 18px;
+                font-size: clamp(1.1rem, 3.5vw, 1.25rem);
                 font-weight: 600;
-                margin-top: 24px;
-                margin-bottom: 10px;
+                margin-top: 1.25rem;
+                margin-bottom: 0.5rem;
                 color: #111;
             }
             
             .document-page p {
-                font-size: 15px;
-                margin-bottom: 14px;
-                line-height: 1.55;
+                font-size: clamp(0.9rem, 3vw, 1rem);
+                margin-bottom: 0.85rem;
+                line-height: 1.6;
                 color: #333;
             }
             
             .document-page ul, .document-page ol {
-                margin-bottom: 14px;
-                padding-left: 24px;
+                margin-bottom: 0.85rem;
+                padding-left: 1.5rem;
             }
             
             .document-page li {
-                font-size: 15px;
-                margin-bottom: 6px;
-                line-height: 1.55;
+                font-size: clamp(0.9rem, 3vw, 1rem);
+                margin-bottom: 0.4rem;
+                line-height: 1.6;
             }
             
             .document-page code {
                 font-family: 'SF Mono', 'Courier New', monospace;
                 background: #f4f4f4;
-                padding: 2px 5px;
+                padding: 0.15rem 0.35rem;
                 border-radius: 4px;
-                font-size: 13px;
+                font-size: 0.85em;
                 word-break: break-word;
             }
             
@@ -218,17 +209,18 @@ export default function Articles() {
                 font-family: 'SF Mono', 'Courier New', monospace;
                 background: #1e1e1e;
                 color: #d4d4d4;
-                padding: 14px;
+                padding: 0.85rem;
                 border-radius: 8px;
                 overflow-x: auto;
-                margin-bottom: 14px;
-                font-size: 13px;
+                margin-bottom: 0.85rem;
+                font-size: 0.8rem;
             }
             
             .document-page blockquote {
+                font-family: 'Georgia', 'Times New Roman', Times, serif;
                 border-left: 4px solid #3b82f6;
-                padding-left: 16px;
-                margin: 14px 0;
+                padding-left: 0.85rem;
+                margin: 0.85rem 0;
                 color: #555;
                 font-style: italic;
             }
@@ -237,12 +229,10 @@ export default function Articles() {
                 max-width: 100%;
                 height: auto;
                 border-radius: 8px;
-                margin: 14px 0;
+                margin: 0.85rem 0;
                 box-shadow: 0 1px 3px rgba(0,0,0,0.1);
                 border: 1px solid #e5e7eb;
                 display: block;
-                /* Prevent image loading shift */
-                aspect-ratio: attr(width) / attr(height);
             }
             
             .page-footer {
@@ -260,7 +250,7 @@ export default function Articles() {
             }
             
             hr {
-                margin: 24px 0;
+                margin: 1.5rem 0;
                 border: none;
                 border-top: 1px solid #e5e7eb;
             }
@@ -268,10 +258,13 @@ export default function Articles() {
             a {
                 color: #3b82f6;
                 text-decoration: none;
-                word-break: break-word;
+                word-break: break-all;
             }
             
-            /* Tablet and Desktop */
+            a:hover {
+                text-decoration: underline;
+            }
+            
             @media (min-width: 768px) {
                 .pdf-viewer {
                     padding: 48px 0;
@@ -282,36 +275,16 @@ export default function Articles() {
                     border-radius: 2px;
                 }
                 .document-page h1 {
-                    font-size: 40px;
-                    margin-bottom: 24px;
+                    margin-bottom: 1.5rem;
                 }
-                .document-page h2 {
-                    font-size: 28px;
-                    margin-top: 40px;
-                    margin-bottom: 16px;
-                }
-                .document-page h3 {
-                    font-size: 22px;
-                    margin-top: 32px;
-                }
-                .document-page p, .document-page li {
-                    font-size: 16px;
+                .document-page p {
+                    margin-bottom: 1rem;
                 }
                 .page-footer {
                     bottom: 36px;
                     left: 80px;
                     right: 80px;
                     font-size: 11px;
-                }
-            }
-            
-            /* Large Desktop */
-            @media (min-width: 1200px) {
-                .document-page {
-                    max-width: 1000px;
-                }
-                .document-page h1 {
-                    font-size: 44px;
                 }
             }
         </style>
@@ -620,18 +593,19 @@ export default function Articles() {
     `;
 
     return (
-        <section id="articles" className="py-12 sm:py-32 px-4 sm:px-6 flex flex-col items-center w-full">
+        <section id="articles" className="py-16 sm:py-32 px-4 sm:px-6 flex flex-col items-center">
             <div className="max-w-4xl w-full text-center mb-8 sm:mb-12">
-                <h2 className="text-[10px] sm:text-sm font-mono text-blue-500 tracking-[0.5em] uppercase mb-3 sm:mb-4">Documentation_Log</h2>
+                <h2 className="text-xs sm:text-sm font-mono text-blue-500 tracking-[0.5em] uppercase mb-3 sm:mb-4">Documentation_Log</h2>
                 <h3 className="text-2xl sm:text-3xl md:text-4xl font-bold text-white tracking-tight">Technical Whitepaper</h3>
             </div>
 
-            {/* THUMBNAIL CARD - FIXED, NO LAYOUT SHIFT */}
-            <div
+            {/* THUMBNAIL CARD - Works on ALL devices (PC, tablet, mobile) */}
+            <motion.div
+                layoutId="article-card"
                 onClick={() => setIsOpen(true)}
                 onTouchStart={() => setIsOpen(true)}
-                className="group relative cursor-pointer w-full max-w-2xl aspect-[4/3] sm:aspect-[16/9] bg-[#0d0d0d] border border-white/10 rounded-xl overflow-hidden shadow-2xl transition-all hover:border-blue-500/50 active:scale-[0.98] hover:shadow-blue-500/20"
-                style={{ cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}
+                style={{ cursor: 'pointer' }}
+                className="group relative w-full max-w-2xl aspect-[4/3] sm:aspect-[16/9] bg-[#0d0d0d] border border-white/10 rounded-xl overflow-hidden shadow-2xl transition-all hover:border-blue-500/50 active:scale-[0.98] hover:shadow-blue-500/20"
             >
                 <div className="absolute inset-0 bg-gradient-to-b from-white/[0.02] to-transparent" />
                 <div className="absolute inset-0 flex flex-col items-center justify-center p-6 sm:p-12 text-center">
@@ -644,9 +618,9 @@ export default function Articles() {
                     </div>
                 </div>
                 <div className="absolute top-0 right-0 w-12 h-12 sm:w-16 sm:h-16 bg-white/5 border-b border-l border-white/10 -translate-y-6 sm:-translate-y-8 translate-x-6 sm:translate-x-8 rotate-45 group-hover:translate-y-0 group-hover:translate-x-0 transition-all duration-500" />
-            </div>
+            </motion.div>
 
-            {/* FULLSCREEN MODAL */}
+            {/* FULLSCREEN MODAL - Responsive */}
             <AnimatePresence>
                 {isOpen && (
                     <motion.div
@@ -654,19 +628,18 @@ export default function Articles() {
                         animate={{ opacity: 1 }}
                         exit={{ opacity: 0 }}
                         className="fixed inset-0 z-[100] bg-black/90 flex flex-col items-center overflow-hidden"
-                        style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0 }}
                     >
-                        {/* CONTROL BAR - STABLE */}
-                        <div className="w-full bg-[#2d2d2d] border-b border-white/10 py-3 px-4 sm:px-6 flex items-center justify-between z-10 shadow-lg shrink-0 min-h-[52px]">
-                            <div className="flex items-center gap-2 sm:gap-3 text-white font-mono text-[11px] sm:text-sm truncate">
-                                <FileText size={14} className="sm:w-[18px] sm:h-[18px] text-blue-400 shrink-0" />
-                                <span className="truncate">The_TrakSYS_Paradox_Whitepaper.pdf</span>
+                        {/* CONTROL BAR - Responsive */}
+                        <div className="w-full bg-[#2d2d2d] border-b border-white/10 py-2 sm:py-3 px-3 sm:px-6 flex items-center justify-between z-10 shadow-lg shrink-0">
+                            <div className="flex items-center gap-2 sm:gap-3 text-white font-mono text-[10px] sm:text-sm">
+                                <FileText size={14} className="sm:w-[18px] sm:h-[18px] text-blue-400" />
+                                <span className="truncate max-w-[120px] sm:max-w-none">The_TrakSYS_Paradox_Whitepaper.pdf</span>
                             </div>
-                            <div className="flex gap-2 sm:gap-3 shrink-0">
+                            <div className="flex gap-2 sm:gap-3">
                                 <button
                                     onClick={generatePDF}
                                     disabled={isDownloading}
-                                    className={`flex items-center gap-1 sm:gap-2 px-3 sm:px-4 py-1.5 rounded-md text-white text-[11px] sm:text-xs font-semibold transition ${
+                                    className={`flex items-center gap-1 sm:gap-2 px-2 sm:px-4 py-1 sm:py-1.5 rounded-md text-white text-[10px] sm:text-xs font-semibold transition ${
                                         isDownloading 
                                             ? 'bg-gray-500 cursor-not-allowed' 
                                             : 'bg-blue-600 hover:bg-blue-500'
@@ -674,11 +647,11 @@ export default function Articles() {
                                 >
                                     <Download size={12} className="sm:w-[14px] sm:h-[14px]" />
                                     <span className="hidden sm:inline">{isDownloading ? 'GENERATING...' : 'DOWNLOAD PDF'}</span>
-                                    <span className="sm:hidden">PDF</span>
+                                    <span className="sm:hidden">{isDownloading ? '...' : 'PDF'}</span>
                                 </button>
                                 <button
                                     onClick={() => setIsOpen(false)}
-                                    className="p-1.5 bg-red-600/80 rounded-md text-white hover:bg-red-500 transition shrink-0"
+                                    className="p-1 sm:p-1.5 bg-red-600/80 rounded-md text-white hover:bg-red-500 transition"
                                 >
                                     <X size={14} className="sm:w-[18px] sm:h-[18px]" />
                                 </button>
@@ -686,7 +659,7 @@ export default function Articles() {
                         </div>
 
                         {/* SCROLLABLE DOCUMENT AREA */}
-                        <div className="w-full flex-1 overflow-y-auto overscroll-contain">
+                        <div className="w-full flex-1 overflow-y-auto">
                             <div ref={contentRef} dangerouslySetInnerHTML={{ __html: articleContent }} />
                         </div>
                     </motion.div>
