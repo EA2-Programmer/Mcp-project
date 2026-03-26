@@ -62,19 +62,25 @@ class PerformanceTools:
                     equipment_list = result["equipment"]
 
                     if not equipment_list:
-                        return ToolResponse.no_data(
+                        response = ToolResponse.no_data(
                             suggestions=[
                                 "Verify the system_name or system_id is correct",
                                 "Ensure the equipment is enabled (IsTemplate=0) in tSystem",
                             ]
-                        ).to_dict()
+                        )
+                        self.tracing.set_output(span, response.to_dict())
+                        return response.to_dict()
 
-                    return ToolResponse.success(data=equipment_list).to_dict()
+                    response = ToolResponse.success(data=equipment_list)
+                    self.tracing.set_output(span, response.to_dict())
+                    return response.to_dict()
 
                 except Exception as e:
                     self.tracing.record_error(span, e, "get_equipment_state")
                     self.logger.error("get_equipment_state failed: %s", e, exc_info=True)
-                    return ToolResponse.error(
+                    response = ToolResponse.error(
                         message=str(e),
                         suggestions=["Verify the system_name or system_id is correct"]
-                    ).to_dict()
+                    )
+                    self.tracing.set_output(span, response.to_dict())
+                    return response.to_dict()

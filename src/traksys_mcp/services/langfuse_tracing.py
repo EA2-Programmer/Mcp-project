@@ -1,9 +1,6 @@
 """
 Langfuse tracing service for TrakSYS MCP tools.
-
-Wraps Langfuse v3 trace/span lifecycle with clean async context managers.
-When tracing is disabled or Langfuse is unavailable, all operations are
-silent no-ops — callers never need to branch on tracing state.
+Updated for Langfuse v3.
 """
 
 import logging
@@ -11,7 +8,9 @@ import time
 from contextlib import asynccontextmanager, contextmanager
 from typing import Any, Generator, AsyncGenerator, Optional
 
-from src.traksys_mcp.config.setting import settings
+from langfuse import Langfuse, propagate_attributes
+
+from ..config.setting import settings
 
 logger = logging.getLogger(__name__)
 
@@ -23,242 +22,310 @@ logger = logging.getLogger(__name__)
 class _NoOpSpan:
     """Silent no-op span. All operations succeed without side effects."""
 
-    def update(self, **kwargs) -> None:
-        pass
+    def update(self, **kwargs) -> None: pass
 
-    def end(self) -> None:
-        pass
+    def end(self) -> None: pass
 
-    def span(self, **kwargs) -> "_NoOpSpan":
-        return self
+    def span(self, **kwargs) -> "_NoOpSpan": return self
 
-    def generation(self, **kwargs) -> "_NoOpSpan":
-        return self
+    def generation(self, **kwargs) -> "_NoOpSpan": return self
 
-    def event(self, **kwargs) -> "_NoOpSpan":
-        return self
+    def event(self, **kwargs) -> "_NoOpSpan": return self
 
 
 _NOOP = _NoOpSpan()
 
 
+class OtelSpanWrapper:
+    """
+    Wraps an OpenTelemetry-based Langfuse observation context manager
+    to provide the .update() and .end() methods expected by the orchestrator loop.
+    """
+    def __init__(self, context_manager: Any):
+        self.context_manager = context_manager
+        self.span = self.context_manager.__enter__()
+
+    def update(self, **kwargs):
+        if hasattr(self.span, "update"):
+            self.span.update(**kwargs)
+
+    def end(self):
+        try:
+            self.context_manager.__exit__(None, None, None)
+        except Exception as e:
+            logger.debug("Error ending Otel span: %s", e)
+
+    def __getattr__(self, name):
+        return getattr(self.span, name)
+
+
 class SpanWrapper:
     """
-    Wraps a Langfuse span and its parent trace.
-
-    Responsibilities:
-    - Forwards update/generation/span/event calls to the underlying span
-    - Tracks child spans so they are ended before the parent
-    - Ends the trace when end() is called
+    Wraps a Langfuse span and its root observation (trace).
+    Ensures that updates (like output) are synced to both the span AND the trace
+    so that data appears 'seamlessly' in the Langfuse dashboard.
     """
 
-    __slots__ = ("_span", "_trace", "_children")
-
-    def __init__(self, span: Any, trace: Any) -> None:
+    def __init__(self, span: Any, root_span: Any, client: Optional[Langfuse] = None):
         self._span = span
-        self._trace = trace
-        self._children: list[Any] = []
+        self.root_span = root_span
+        self.client = client
 
-    def update(self, **kwargs) -> None:
-        self._span.update(**kwargs)
+    def update(self, **kwargs):
+        if hasattr(self._span, 'update'):
+            self._span.update(**kwargs)
+        if self.root_span and self.root_span != self._span and hasattr(self.root_span, 'update'):
+            self.root_span.update(**kwargs)
 
-    def span(self, name: str, input: Any = None, **kwargs) -> Any:
-        child = self._span.span(name=name, input=input, **kwargs)
-        self._children.append(child)
-        return child
+    def end(self):
+        if hasattr(self._span, 'end'):
+            self._span.end()
 
-    def generation(self, name: str, input: Any = None, output: Any = None, **kwargs) -> Any:
-        child = self._span.generation(name=name, input=input, output=output, **kwargs)
-        self._children.append(child)
-        return child
+    def span(self, **kwargs) -> Any:
+        """Creates a child span."""
+        if hasattr(self._span, 'span') and callable(self._span.span):
+            return self._span.span(**kwargs)
 
-    def event(self, name: str, input: Any = None, **kwargs) -> Any:
-        child = self._span.event(name=name, input=input, **kwargs)
-        self._children.append(child)
-        return child
+        if self.client:
+            parent_id = getattr(self._span, "id", None)
+            ctx = self.client.start_as_current_observation(
+                as_type="span",
+                trace_context={"parent_observation_id": parent_id} if parent_id else None,
+                **kwargs
+            )
+            return OtelSpanWrapper(ctx)
 
-    def end(self) -> None:
-        for child in self._children:
-            child.end()
-        self._span.end()
-        self._trace.end()
+        return self._span
+
+    def event(self, **kwargs) -> Any:
+        """Creates a child event using the event method on the span."""
+        if hasattr(self._span, 'event') and callable(self._span.event):
+            return self._span.event(**kwargs)
+
+        if self.client:
+            parent_id = getattr(self._span, "id", None)
+            ctx = self.client.start_as_current_observation(
+                as_type="span",
+                name="event",
+                trace_context={"parent_observation_id": parent_id} if parent_id else None,
+                **kwargs
+            )
+            return OtelSpanWrapper(ctx)
+
+        return self._span
+
+    def generation(self, **kwargs) -> Any:
+        """Creates a child generation."""
+        if hasattr(self._span, 'generation') and callable(self._span.generation):
+            return self._span.generation(**kwargs)
+
+        if self.client:
+            parent_id = getattr(self._span, "id", None)
+            ctx = self.client.start_as_current_observation(
+                as_type="generation",
+                trace_context={"parent_observation_id": parent_id} if parent_id else None,
+                **kwargs
+            )
+            return OtelSpanWrapper(ctx)
+
+        return self._span
+
+    def __getattr__(self, name):
+        return getattr(self._span, name)
 
 
 class TracingService:
-    """
-    Langfuse tracing service for MCP tools.
+    def __init__(self):
+        self.enabled = settings.ENABLE_TRACING
+        self._client: Optional[Langfuse] = None
 
-    Usage:
-        async with tracing.trace_tool("get_batches", inputs) as span:
-            result = await do_work()
-            tracing.set_output(span, result)
-    """
+        if self.enabled:
+            try:
+                secret_key = None
+                if settings.LANGFUSE_SECRET_KEY:
+                    secret_key = settings.LANGFUSE_SECRET_KEY.get_secret_value()
 
-    def __init__(self) -> None:
-        self._client: Any = None
-        self._enabled = False
-        self._init()
+                self._client = Langfuse(
+                    secret_key=secret_key,
+                    public_key=settings.LANGFUSE_PUBLIC_KEY,
+                    host=settings.LANGFUSE_BASE_URL,
+                )
+                if not self._client.auth_check():
+                    logger.error("Langfuse auth failed. Tracing disabled.")
+                    self.enabled = False
+                else:
+                    logger.info("Langfuse tracing enabled and authenticated")
+            except Exception as e:
+                logger.error("Langfuse init error: %s", e)
+                self.enabled = False
 
-    def _init(self) -> None:
-        if not settings.ENABLE_TRACING:
-            logger.info("Tracing disabled (ENABLE_TRACING=False)")
+    @asynccontextmanager
+    async def trace_chat(self, *args, **kwargs) -> AsyncGenerator[Any, None]:
+        """Traces the main chat execution for the orchestrator."""
+        if not self.enabled or not self._client:
+            yield _NOOP
             return
 
-        if not settings.LANGFUSE_SECRET_KEY or not settings.LANGFUSE_PUBLIC_KEY:
-            logger.warning("Tracing disabled: LANGFUSE_SECRET_KEY or LANGFUSE_PUBLIC_KEY not set")
-            return
-
+        yielded = False
         try:
-            from langfuse import Langfuse
-
-            self._client = Langfuse(
-                secret_key=settings.LANGFUSE_SECRET_KEY.get_secret_value(),
-                public_key=settings.LANGFUSE_PUBLIC_KEY,
-                host=settings.LANGFUSE_BASE_URL,
-                debug=settings.LOG_LEVEL == "DEBUG",
-                flush_at=20,
-                flush_interval=10,
-            )
-            self._client.auth_check()
-            self._enabled = True
-            logger.info("Langfuse tracing enabled → %s", settings.LANGFUSE_BASE_URL)
-
-        except ImportError:
-            logger.warning("Tracing disabled: langfuse package not installed")
+            # Create a root span that will be the trace
+            with self._client.start_as_current_observation(
+                as_type="span",
+                name="agent_chat_session",
+                input={"args": args, "kwargs": kwargs}
+            ) as root_span:
+                # The chat session itself is the root span; we don't need a separate child.
+                yielded = True
+                yield SpanWrapper(root_span, root_span, self._client)
         except Exception as e:
-            logger.error("Langfuse init failed: %s", e)
-
-    @property
-    def enabled(self) -> bool:
-        return self._enabled
-
+            if not yielded:
+                logger.error("Chat trace setup failed: %s", e)
+                yield _NOOP
+            else:
+                raise
+        finally:
+            if self._client:
+                self._client.flush()
 
     @asynccontextmanager
     async def trace_tool(
         self, tool_name: str, inputs: dict
     ) -> AsyncGenerator[Any, None]:
-        """
-        Root trace + span for a single tool execution.
-
-        Yields a SpanWrapper on success, or _NOOP if tracing is off.
-        """
-        if not self._enabled:
+        if not self.enabled or not self._client:
             yield _NOOP
             return
 
-        wrapper: Any = _NOOP
+        yielded = False
         try:
-            trace = self._client.trace(
+            # Create a root span that will be the trace
+            with self._client.start_as_current_observation(
+                as_type="span",
                 name=f"tools/call_{tool_name}",
-                input=inputs,
-                metadata={
-                    "server": "TrakSYS MCP",
-                    "version": "1.0.0",
-                    "transport": settings.SERVER_TRANSPORT,
-                    "read_only": settings.READ_ONLY,
-                },
-                tags=["mcp", "traksys", f"tool:{tool_name}",
-                      f"transport:{settings.SERVER_TRANSPORT}"],
-            )
-            span = trace.span(name=tool_name, input=inputs)
-            wrapper = SpanWrapper(span, trace)
-            yield wrapper
-
+                input=inputs
+            ) as root_span:
+                # The tool execution is the root span; no separate child needed.
+                yielded = True
+                yield SpanWrapper(root_span, root_span, self._client)
         except Exception as e:
-            logger.error("Trace setup failed for %s: %s", tool_name, e)
-            yield _NOOP
-            return
+            if not yielded:
+                logger.error("Trace tool failed: %s", e)
+                yield _NOOP
+            else:
+                raise
+        finally:
+            if self._client:
+                self._client.flush()
+
+    def record_llm_call(self, parent: Any, turn: int, messages_count: int, tools_count: int) -> Any:
+        """Records an LLM generation as a child of the trace."""
+        if not self.enabled or not self._client or isinstance(parent, _NoOpSpan):
+            return _NOOP
+
+        parent_observation = parent.root_span if hasattr(parent, 'root_span') else parent
+        parent_id = getattr(parent_observation, "id", None)
+
         try:
-            wrapper.end()
+            ctx = self._client.start_as_current_observation(
+                name=f"llm-generation-turn-{turn}",
+                as_type="generation",
+                input={"messages_count": messages_count, "tools_count": tools_count},
+                metadata={"turn": turn},
+                trace_context={"parent_observation_id": parent_id} if parent_id else None
+            )
+            return OtelSpanWrapper(ctx)
         except Exception as e:
-            logger.debug("Span end error for %s: %s", tool_name, e)
+            logger.error("Failed to record LLM call: %s", e)
+            return _NOOP
 
+    def record_error(self, trace: Any, error: Exception, context: str = "") -> None:
+        """Records an error event in the trace."""
+        if not self.enabled or not self._client or isinstance(trace, _NoOpSpan):
+            return
+
+        target = trace.root_span if hasattr(trace, 'root_span') else trace
+
+        if hasattr(target, 'event') and callable(target.event):
+            target.event(
+                name="error",
+                level="ERROR",
+                status_message=str(error),
+                input={"context": context, "error_type": type(error).__name__}
+            )
+        else:
+            parent_id = getattr(target, "id", None)
+            try:
+                with self._client.start_as_current_observation(
+                    as_type="span",
+                    name="error",
+                    level="ERROR",
+                    status_message=str(error),
+                    input={"context": context, "error_type": type(error).__name__},
+                    trace_context={"parent_observation_id": parent_id} if parent_id else None
+                ):
+                    pass
+            except Exception as e:
+                logger.error("Failed to record error trace: %s", e)
+
+        if hasattr(target, "update"):
+            target.update(level="ERROR", status_message=str(error))
+
+    def set_trace_output(self, trace: Any, output: Any) -> None:
+        """Updates the trace with final output data."""
+        if not self.enabled or isinstance(trace, _NoOpSpan):
+            return
+        trace.update(output=output)
+
+    def set_output(self, span: Any, output: Any) -> None:
+        if not self.enabled or isinstance(span, _NoOpSpan):
+            return
+        span.update(output=output)
 
     @contextmanager
-    def db_span(
-        self,
-        parent: Any,
-        name: str,
-        sql_hash: str,
-        params_count: int,
-    ) -> Generator[Any, None, None]:
-        """
-        Child span for a single database query.
-        """
-        if not self._enabled or isinstance(parent, _NoOpSpan):
+    def db_span(self, *args, **kwargs) -> Generator[Any, None, Any]:
+        """Flexible span for database queries to prevent signature crashes."""
+        if not self.enabled or not self._client:
             yield _NOOP
             return
 
-        child = parent.span(
-            name=name,
-            input={"sql_hash": sql_hash, "params_count": params_count},
-        )
+        span_name = "database_query"
+        if args:
+            span_name = str(args[0])
+
+        yielded = False
         try:
-            yield child
+            with self._client.start_as_current_observation(
+                as_type="span",
+                name=span_name,
+                input={"args": [str(a) for a in args], "kwargs": str(kwargs)}
+            ) as root_span:
+                with self._client.start_as_current_observation(
+                    as_type="span",
+                    name="query_execution",
+                ) as child_span:
+                    yielded = True
+                    yield child_span
+        except Exception:
+            if not yielded:
+                yield _NOOP
+            else:
+                raise
         finally:
-            try:
-                child.end()
-            except Exception as e:
-                logger.debug("DB span end error: %s", e)
+            if self._client:
+                self._client.flush()
 
-
-    def set_output(self, span: Any, output: dict) -> None:
-        """
-        Attach tool output to the span.
-        Caps list fields at 5 items to keep Langfuse payloads small.
-        """
-        if not self._enabled or isinstance(span, _NoOpSpan):
+    def record_db_rows(self, span: Any, rows: int, execution_time: float | None = None) -> None:
+        if not self.enabled or isinstance(span, _NoOpSpan):
             return
 
-        truncated = {
-            k: {"count": len(v), "sample": v[:5], "note": f"First 5 of {len(v)}"}
-            if isinstance(v, list) and len(v) > 5
-            else v
-            for k, v in output.items()
-        }
-
-        span.update(output=truncated)
-        if hasattr(span, "_trace"):
-            span._trace.update(output=truncated)
-
-    def record_error(self, span: Any, error: Exception, tool_name: str) -> None:
-        """Attach error details to the span."""
-        if not self._enabled or isinstance(span, _NoOpSpan):
-            return
-
-        span.update(
-            level="ERROR",
-            status_message=str(error),
-            output={
-                "error": str(error),
-                "type": type(error).__name__,
-                "tool": tool_name,
-            },
-        )
-
-    def record_db_rows(
-        self, span: Any, rows: int, execution_time: float | None = None
-    ) -> None:
-        """Attach query result count (and optional timing) to a DB child span."""
-        if not self._enabled or isinstance(span, _NoOpSpan):
-            return
-
-        metadata: dict[str, Any] = {"rows": rows}
+        metadata = {"rows": rows}
         if execution_time is not None:
             metadata["execution_ms"] = round(execution_time, 2)
         span.update(metadata=metadata)
 
-
     def shutdown(self) -> None:
-        """Flush all pending spans before process exit."""
-        if not self._enabled or not self._client:
-            return
-        try:
+        if self.enabled and self._client:
             self._client.flush()
             time.sleep(1)
-            logger.info("Langfuse flushed on shutdown")
-        except Exception as e:
-            logger.error("Langfuse shutdown error: %s", e)
 
 
 _instance: Optional[TracingService] = None
@@ -271,3 +338,9 @@ def register_instance(service: TracingService) -> None:
 
 def get_tracing_service() -> Optional[TracingService]:
     return _instance
+
+
+def init_tracing() -> TracingService:
+    service = TracingService()
+    register_instance(service)
+    return service

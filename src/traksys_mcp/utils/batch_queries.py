@@ -1,5 +1,3 @@
-# Lookup queries — static, reused across multiple service functions
-
 BATCH_NAME_LOOKUP = """
     SELECT TOP 1 ID
     FROM tBatch
@@ -30,7 +28,6 @@ _BATCH_COLUMNS = """
     b.ActualBatchSize                   AS actual_batch_size,
     b.PlannedBatchDurationSeconds       AS planned_duration_seconds,
     j.Name                              AS job_name,
-    ISNULL(CONVERT(nvarchar(100), j.ExternalID), '') AS job_external_id,
     j.Lot                               AS job_lot,
     CONVERT(nvarchar(30), j.PlannedStartDateTime, 127) AS job_planned_start,
     jb.RecipeID                         AS recipe_id,
@@ -130,7 +127,7 @@ BATCH_INFO = """
     SELECT
         b.ID                            AS batch_id,
         b.Name                          AS batch_name,
-        b.AltName                       AS batch_alt_name,
+        b.JobID                         AS job_id,
         b.State                         AS state,
         CONVERT(nvarchar(30), b.StartDateTime, 127) AS start_datetime,
         CONVERT(nvarchar(30), b.EndDateTime, 127) AS end_datetime,
@@ -219,17 +216,18 @@ def build_quality_deviations_query(limit: int, batch_filter: str) -> str:
     return f"""
         SELECT TOP {limit}
             bp.BatchID                  AS batch_id,
-            b.Name                      AS batch_name,
-            p.Name                      AS product_name,
-            s.Name                      AS system_name,
-            pd.Name                     AS parameter_name,
-            pd.Description              AS parameter_description,
-            bp.Value                    AS value_raw,
-            TRY_CAST(bp.Value AS float) AS value_numeric,
-            pd.MinimumValue             AS min_allowed,
-            pd.MaximumValue             AS max_allowed,
-            CONVERT(varchar(50), b.StartDateTime, 127) AS batch_start,
-            CONVERT(varchar(50), b.EndDateTime, 127) AS batch_end
+            b.JobID                      AS job_id,
+            b.Name                       AS batch_name,
+            p.Name                       AS product_name,
+            s.Name                       AS system_name,
+            pd.Name                      AS parameter_name,
+            pd.Description               AS parameter_description,
+            bp.Value                     AS value_raw,
+            TRY_CAST(bp.Value AS float)  AS value_numeric,
+            pd.MinimumValue              AS min_allowed,
+            pd.MaximumValue              AS max_allowed,
+            b.StartDateTime              AS batch_start,
+            b.EndDateTime                AS batch_end
         FROM tBatchParameter bp
         INNER JOIN tBatch b                ON bp.BatchID               = b.ID
         INNER JOIN tParameterDefinition pd ON bp.ParameterDefinitionID = pd.ID
@@ -274,6 +272,7 @@ def build_quality_incomplete_tasks_query(limit: int, batch_filter: str) -> str:
     return f"""
         SELECT TOP {limit}
             t.BatchID               AS batch_id,
+            b.JobID                 AS job_id,
             b.Name                  AS batch_name,
             p.Name                  AS product_name,
             s.Name                  AS system_name,

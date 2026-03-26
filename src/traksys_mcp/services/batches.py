@@ -33,10 +33,13 @@ async def _resolve_batch_name(batch_name: str, trace_span=None) -> int | None:
         trace_span=trace_span,
         span_name="batch_name_lookup",
     )
-    if rows and rows[0][0]:
-        logger.info("Resolved batch_name '%s' → ID %s", batch_name, rows[0][0])
-        return rows[0][0]
-    return None
+    res = rows[0][0] if rows and rows[0][0] else None
+    if res:
+        logger.info("Resolved batch_name '%s' → ID %s", batch_name, res)
+    
+    if trace_span:
+        trace_span.update(output=res)
+    return res
 
 
 async def _resolve_system_name(system_name: str, trace_span=None) -> int | None:
@@ -47,10 +50,13 @@ async def _resolve_system_name(system_name: str, trace_span=None) -> int | None:
         trace_span=trace_span,
         span_name="system_name_lookup",
     )
-    if rows and rows[0][0]:
-        logger.info("Resolved system_name '%s' → ID %s", system_name, rows[0][0])
-        return rows[0][0]
-    return None
+    res = rows[0][0] if rows and rows[0][0] else None
+    if res:
+        logger.info("Resolved system_name '%s' → ID %s", system_name, res)
+    
+    if trace_span:
+        trace_span.update(output=res)
+    return res
 
 
 async def get_batches(
@@ -152,6 +158,9 @@ async def get_batches(
 
     if time_info:
         result["time_info"] = time_info
+
+    if trace_span:
+        trace_span.update(output=result)
 
     return result
 
@@ -259,6 +268,9 @@ async def get_batch_parameters(
 
     if time_info:
         result["time_info"] = time_info
+
+    if trace_span:
+        trace_span.update(output=result)
 
     return result
 
@@ -469,6 +481,9 @@ async def get_batch_materials(
     if time_info:
         result["time_info"] = time_info
 
+    if trace_span:
+        trace_span.update(output=result)
+
     return result
 
 
@@ -538,7 +553,7 @@ async def get_batch_details(
         "tasks_count":      len(compliance_tasks),
         "incomplete_tasks": incomplete_task_count,
         "methodology": {
-            "approach": "Full batch drill-down across four independent data sections",
+            "approach": "Full batch analysis across four independent data sections",
             "signals_checked": [
                 "Batch header: core info from tBatch joined with tJob, tProduct, tSystem",
                 f"Steps: {len(steps)} execution steps from tBatchStep + tFunctionDefinition",
@@ -675,5 +690,8 @@ async def get_batch_quality_analysis(
 
     if time_info:
         result["time_info"] = time_info
+
+    if trace_span:
+        trace_span.update(output=result)
 
     return result
