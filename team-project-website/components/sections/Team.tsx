@@ -2,7 +2,7 @@ import { Linkedin, Github, ExternalLink, ShieldCheck } from 'lucide-react';
 const team = [
     { name: "Aisosa", role: "Systems Architect", li: "https://www.linkedin.com/in/aisosa-edobor-137041252/", gh: "#", img: "/images/Aisosa.jpeg" },
     { name: "Kingsley", role: "Protocol Lead", li: "https://www.linkedin.com/in/kingsley-ahams-b92142274/", gh: "https://github.com/Ahams-K", img: "/images/Kingsley.jpeg" },
-    { name: "Wajhudin", role: "Interface Engineer", li: "https://www.linkedin.com/in/wajhudin-ibrahim-55b5a030a/", gh: "#", img: "/images/wajhudin.jpg" }
+    { name: "Wajhudin", role: "Interface Engineer", li: "https://www.linkedin.com/in/wajhudin-ibrahim-55b5a030a/", gh: "#", img: "/images/Wajhudin.jpg" }
 ];
 
 export default function Team() {
