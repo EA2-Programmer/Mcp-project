@@ -10,7 +10,7 @@ export default function Video() {
                     controls
                     className="w-full max-w-3xl rounded-xl border border-[#222]"
                 >
-                    <source src="/videos/demo.mp4" type="video/mp4" />
+                    <source src="/video/last_vid.mp4" type="video/mp4" />
                     Your browser does not support the video tag.
                 </video>
             </div>
