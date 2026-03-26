@@ -10,7 +10,7 @@ export default function Team() {
     return (
         <section id="team" className="py-16 sm:py-32 px-4 sm:px-6 bg-[#050505]">
             <div className="max-w-6xl mx-auto">
-                <h2 className="text-2xl sm:text-3xl md:text-4xl font-bold text-white mb-8 sm:mb-16 tracking-tight">Engineering Unit</h2>
+                <h2 className="text-2xl sm:text-3xl md:text-4xl font-bold text-white mb-8 sm:mb-16 tracking-tight">Engineering Team</h2>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 sm:gap-8">
                     {team.map((m, i) => (
                         <div key={i} className="group relative bg-[#0a0a0a] border border-white/5 rounded-2xl sm:rounded-3xl p-6 sm:p-8 hover:border-blue-500/50 transition-all duration-500">

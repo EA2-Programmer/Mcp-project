@@ -10,7 +10,7 @@ export default function Navbar() {
         { name: 'Terminal', id: 'hero' },
         { name: 'Engineers', id: 'team' },
         { name: 'System_Demo', id: 'video' },
-        { name: 'Documentation', id: 'articles' }
+        { name: 'Article', id: 'articles' }
     ];
 
     useEffect(() => {
