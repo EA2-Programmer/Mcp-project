@@ -13,7 +13,6 @@ SYSTEM_NAME_LOOKUP = """
 
 BATCH_JOB_LOOKUP = "SELECT TOP 1 JobID FROM tBatch WHERE ID = ?"
 
-# Column blocks — shared between query builders
 
 _BATCH_COLUMNS = """
     b.ID                                AS batch_id,
