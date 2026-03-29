@@ -65,13 +65,13 @@ uv run python src/server.py
 ```
 
 # Database connection
-#MSSQL_CONNECTION_STRING="Driver={ODBC Driver 17 for SQL Server};Server=localhost,1433;Database=EBR_Template;Trusted_Connection=yes"
+#MSSQL_CONNECTION_STRING=
 
-MSSQL_CONNECTION_STRING="Driver={ODBC Driver 17 for SQL Server};Server=localhost;Database=EBR_Template;Trusted_Connection=yes;TrustServerCertificate=yes"
+MSSQL_CONNECTION_STRING=
 
 
 CLAUDE_MODEL=claude-sonnet-4-5
-ANTHROPIC_API_KEY=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
+ANTHROPIC_API_KEY=
 USE_UV=0
 
 # Security
