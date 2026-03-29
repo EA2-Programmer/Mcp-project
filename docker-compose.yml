@@ -31,7 +31,7 @@ services:
           path: ./src
           target: /app/src
         - action: sync
-          path: ./traksys_agent               # changed from traksys-agent
+          path: ./traksys_agent               
           target: /app/traksys_agent
     ports:
       - "8000:8000"
