@@ -57,7 +57,6 @@ class TrakSYSMCPServer:
             )
         self.logger.info("✓ Database connection verified")
 
-        # === Key fix: background cache refresh so startup is fast ===
         self.data_cache = DataAvailabilityCache()
         asyncio.create_task(self._refresh_cache_background())
 
